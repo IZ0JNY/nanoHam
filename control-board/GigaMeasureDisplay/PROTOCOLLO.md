@@ -61,3 +61,4 @@ Se succede, il lato GIGA (pin, modulo, software) è a posto.
 - VCC e GND di ogni modulo dalla propria scheda. Sul lato GIGA l'uscita del modulo verso D0 non deve superare 3,3 V.
 - Dopo aver ricablato, spegni e riaccendi le schede.
 - I LED dei moduli fissi indicano solo che la luce arriva (UART a riposo); lampeggiano quando passano dati.
+- Se il display torna in DEMO e i LED dei moduli non lampeggiano, controlla prima i fili dupont su R4 pin 1 e GIGA pin 0: un contatto lento basta a interrompere il link. Per l'uso definitivo meglio connettori saldati o a vite.
