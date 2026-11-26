@@ -26,6 +26,7 @@
 #define REFRESH_MS  100     // refresh display
 #define TIMEOUT_MS  1000    // oltre questo tempo senza dati il canale va in "NO DATA"
 #define DEMO        1       // 1 = senza dati dalla UART genera un'onda 0..10 V di prova
+#define DEBUG_RX    0       // 1 = stampa ogni riga ricevuta sulla seriale USB
 #define METER_CH    0       // canale mostrato sul voltmetro analogico (0 = CH1)
 
 // Ingresso fisico sempre 0..10 V. Valore mostrato = Vin * scale + offset.
@@ -82,6 +83,7 @@ const int RX = 532, RY = 16, RW = 252, RH = 448;
 // ---------- Ricezione UART ----------
 unsigned long lastReal = 0;          // ultimo dato vero ricevuto dalla UART
 bool demoActive = false;
+unsigned long rxCount = 0, rxBad = 0;   // righe valide / scartate (debug su USB)
 char rxBuf[32];
 uint8_t rxLen = 0;
 
@@ -98,6 +100,7 @@ void parseLine(char *s) {
   c.value = v * c.scale + c.offset;
   c.lastRx = millis();
   lastReal = c.lastRx;
+  rxCount++;
 }
 
 void pollLink() {
@@ -106,7 +109,12 @@ void pollLink() {
     if (c == '\r') continue;
     if (c == '\n') {
       rxBuf[rxLen] = 0;
-      if (rxLen) parseLine(rxBuf);
+      if (rxLen) {
+        unsigned long before = rxCount;
+        parseLine(rxBuf);
+        if (rxCount == before) rxBad++;
+        if (DEBUG_RX) { Serial.print("RX: "); Serial.println(rxBuf); }
+      }
       rxLen = 0;
     } else if (rxLen < sizeof(rxBuf) - 1) {
       rxBuf[rxLen++] = c;
@@ -411,5 +419,19 @@ void loop() {
     drawVinBar();
     for (int i = 0; i < 4; i++) drawRow(i);
     drawMeter();
+  }
+
+  // riepilogo ogni secondo sulla seriale USB (115200)
+  static unsigned long lastLog = 0;
+  if (millis() - lastLog >= 1000) {
+    lastLog = millis();
+    Serial.print(demoActive ? "DEMO" : (chAlive(ch[METER_CH]) ? "LINK" : "NODATA"));
+    Serial.print("  righe ok="); Serial.print(rxCount);
+    Serial.print(" scartate="); Serial.print(rxBad);
+    for (int i = 0; i < 4; i++) {
+      Serial.print("  CH"); Serial.print(i + 1); Serial.print("=");
+      if (chAlive(ch[i]) && !demoActive) Serial.print(ch[i].vin, 3); else Serial.print("-");
+    }
+    Serial.println();
   }
 }
