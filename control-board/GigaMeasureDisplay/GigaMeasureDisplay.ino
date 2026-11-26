@@ -202,13 +202,13 @@ void splash() {
   display.setTextSize(8);
   display.setCursor((W - 7 * 48) / 2, 140);
   display.print("nanoHam");
-  display.setTextColor(WHITE, BLACK);
-  display.setTextSize(3);
-  const char *dev = "Sviluppatore: IZ0JNY";
-  display.setCursor((W - strlen(dev) * 18) / 2, 260);
+  display.setTextColor(GREY, BLACK);
+  display.setTextSize(1);                            // credito in piccolo
+  const char *dev = "dev. IZ0JNY";
+  display.setCursor(W - strlen(dev) * 6 - 10, H - 14);
   display.print(dev);
   for (int s = 0; s < SEGS; s++)                     // barra colorata decorativa
-    display.fillRect(BX + s * SEG_W, 330, SEG_W - 3, 20, levelColor((s + 0.5f) / SEGS));
+    display.fillRect(BX + s * SEG_W, 270, SEG_W - 3, 20, levelColor((s + 0.5f) / SEGS));
   delay(2000);
 }
 

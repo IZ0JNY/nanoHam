@@ -32,7 +32,11 @@ void setup() {
   display.print("GIGA R1 OK");
   display.setTextSize(2);
   display.setCursor(20, h / 3 + 90);
-  display.print("nanoHam - IZ0JNY");
+  display.print("nanoHam");
+  display.setTextSize(1);
+  display.setCursor(w - 80, h - 14);
+  display.print("dev. IZ0JNY");
+  display.setTextSize(2);
   display.setCursor(20, h / 3 + 130);
   display.print("Tocca lo schermo...");
 
