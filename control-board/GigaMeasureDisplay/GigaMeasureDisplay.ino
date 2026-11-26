@@ -10,7 +10,7 @@
 // Vedi PROTOCOLLO.md.
 //
 // Grafica: pannello grigio a sinistra (titolo, stato, 4 canali con barra),
-// pannello teal a destra (voltmetro analogico del CH1 + simbolo alta tensione).
+// pannello teal a destra (indicatore ad arco del CH1 + simbolo alta tensione).
 
 #include "Arduino_GigaDisplay_GFX.h"
 #include <Fonts/FreeSans9pt7b.h>
@@ -269,18 +269,20 @@ void drawRow(int i) {
   c.lastBar = w;
 }
 
-// ---------- Voltmetro analogico (pannello destro) ----------
-// Strumento da pannello classico: quadrante crema, arco di 90 gradi,
-// lancetta nera con perno in basso, come un vecchio voltmetro a bobina mobile.
-const uint16_t C_CREAM = rgb(244, 236, 212);
-const int BOX_X = RX + 10, BOX_Y = RY + 12, BOX_W = RW - 20, BOX_H = 224;
-const int MX = RX + RW / 2, MY = BOX_Y + BOX_H - 14;   // perno della lancetta
-const int MR = 112;                                     // raggio della scala
-const int NEEDLE_L = MR - 2;
-const float SWEEP = 45.0f;                              // +-45 gradi = arco di 90
+// ---------- Indicatore ad arco (pannello destro) ----------
+// Arco spesso a 270 gradi: traccia grigia, riempimento colorato proporzionale
+// al valore (teal, arancio dal 70%, rosso dal 90%), estremi arrotondati,
+// valore grande al centro.
+const uint16_t C_TRACK = rgb(205, 235, 230);
+const int MX = RX + RW / 2, MY = RY + 130;     // centro
+const int AR = 98;                              // raggio della linea media dell'arco
+const int AT = 11;                              // meta' spessore
+const float SWEEP = 135.0f;                     // +-135 gradi = 270
 
-float needleVal = 0;          // posizione lancetta (0..1), smorzata
-float needleDrawn = -1;
+float gaugeVal = 0;           // valore mostrato (0..1), smorzato
+float gaugeDrawn = 0;
+uint16_t gaugeCol = 0;
+bool gaugeInit = false;
 
 void polar(float frac, float r, int &x, int &y) {
   float a = (-SWEEP + 2 * SWEEP * frac) * PI / 180.0f;
@@ -288,63 +290,29 @@ void polar(float frac, float r, int &x, int &y) {
   y = MY - (int)roundf(r * cosf(a));
 }
 
-void drawNeedle(float frac, uint16_t col) {
-  int x, y, x2, y2;
-  polar(frac, NEEDLE_L, x, y);
-  polar(frac, 30, x2, y2);
-  display.drawLine(x2, y2, x, y, col);          // punta sottile
-  display.drawLine(x2 + 1, y2, x + 1, y, col);
-  float a = (-SWEEP + 2 * SWEEP * frac) * PI / 180.0f;
-  int dx = (int)roundf(cosf(a) * 3), dy = (int)roundf(sinf(a) * 3);
-  display.fillTriangle(MX - dx, MY - dy, MX + dx, MY + dy, x2, y2, col);  // base piu' larga
+void arcSeg(float f0, float f1, uint16_t col) {
+  for (float f = f0; f <= f1; f += 0.0015f) {
+    int x0, y0, x1, y1;
+    polar(f, AR - AT, x0, y0);
+    polar(f, AR + AT, x1, y1);
+    display.drawLine(x0, y0, x1, y1, col);
+  }
 }
 
-// arco, banda rossa e tacche (ridisegnati anche dopo ogni passaggio della lancetta)
-void drawScale() {
-  for (float f = 0; f <= 1.0001f; f += 0.002f) {
-    int x0, y0, x1, y1;
-    if (f >= 0.9f) {                                 // zona rossa 9..10
-      polar(f, MR - 6, x0, y0);
-      polar(f, MR - 1, x1, y1);
-      display.drawLine(x0, y0, x1, y1, C_RED);
-    }
-    polar(f, MR, x0, y0);
-    display.drawPixel(x0, y0, C_BLACK);              // arco
-  }
-  for (int k = 0; k <= 50; k++) {
-    float f = k / 50.0f;
-    int len = (k % 5 == 0) ? 14 : 7;
-    int x0, y0, x1, y1;
-    polar(f, MR, x0, y0);
-    polar(f, MR + len, x1, y1);
-    display.drawLine(x0, y0, x1, y1, C_BLACK);
-    if (k % 5 == 0) {
-      polar(f + 0.002f, MR, x0, y0);
-      polar(f + 0.002f, MR + len, x1, y1);
-      display.drawLine(x0, y0, x1, y1, C_BLACK);
-    }
-  }
+void arcCap(float f, uint16_t col) {
+  int x, y;
+  polar(f, AR, x, y);
+  display.fillCircle(x, y, AT, col);
 }
 
 void drawMeterStatic() {
   Channel &c = ch[METER_CH];
   display.fillRoundRect(RX, RY, RW, RH, 14, C_PANEL_R);
-  // cassa nera e quadrante crema
-  display.fillRoundRect(BOX_X, BOX_Y, BOX_W, BOX_H, 10, C_BLACK);
-  display.fillRoundRect(BOX_X + 5, BOX_Y + 5, BOX_W - 10, BOX_H - 10, 6, C_CREAM);
-  drawScale();
-  // numeri 0..10 sopra l'arco
-  for (int k = 0; k <= 10; k += 2) {
-    float f = k / 10.0f;
-    float v = chMin(c) + f * (chMax(c) - chMin(c));
-    char sv[8];
-    snprintf(sv, sizeof(sv), "%g", v);
-    int x, y;
-    polar(f, MR + 24, x, y);
-    printCenter(sv, x, y + 6, &FreeSans9pt7b, C_BLACK);
-  }
-  // unita' e nome in basso a sinistra, fuori dalla corsa della lancetta
-  printAt(c.unit, BOX_X + 16, BOX_Y + BOX_H - 20, &FreeSansBold12pt7b, C_BLACK);
+  arcSeg(0, 1, C_TRACK);
+  arcCap(0, C_TRACK);
+  arcCap(1, C_TRACK);
+  printCenter(c.unit, MX, MY + 44, &FreeSansBold12pt7b, C_TEXT);
+  printCenter(c.name, MX, MY + 96, &FreeSans12pt7b, C_TEXT);
   // simbolo alta tensione: triangolo giallo con fulmine nero
   int tx = MX, tt = RY + 300, tb = RY + 384, hw = 48;
   display.fillTriangle(tx, tt, tx - hw, tb, tx + hw, tb, C_BLACK);
@@ -354,6 +322,7 @@ void drawMeterStatic() {
   display.fillTriangle(tx - 6, tb - 10, tx + 12, m - 4, tx - 1, m - 4, C_BLACK);
   display.fillTriangle(tx - 6, tb - 10, tx - 11, tb - 20, tx - 1, tb - 18, C_BLACK);
   printCenter("HIGH VOLTAGE", MX, RY + 418, &FreeSansBold12pt7b, C_RED);
+  gaugeInit = false;
 }
 
 char lastMeterTxt[16] = "";
@@ -361,24 +330,39 @@ void drawMeter() {
   Channel &c = ch[METER_CH];
   bool alive = chAlive(c);
   float target = alive ? chFrac(c) : 0.0f;
-  needleVal += (target - needleVal) * 0.35f;           // smorzamento "analogico"
+  gaugeVal += (target - gaugeVal) * 0.5f;              // movimento morbido
+  float f = gaugeVal;
+  uint16_t col = alive ? bandColor(f) : C_GREY;
 
-  if (fabsf(needleVal - needleDrawn) > 0.002f) {
-    if (needleDrawn >= 0) drawNeedle(needleDrawn, C_CREAM);
-    drawScale();
-    drawNeedle(needleVal, alive ? C_BLACK : C_GREY);
-    display.fillCircle(MX, MY, 10, C_BLACK);             // perno
-    display.fillCircle(MX, MY, 3, C_GREY);
-    needleDrawn = needleVal;
+  if (!gaugeInit || col != gaugeCol) {                  // ridisegno completo
+    arcSeg(0, 1, C_TRACK);
+    arcCap(1, C_TRACK);
+    arcSeg(0, f, col);
+    arcCap(0, col);
+    arcCap(f, col);
+    gaugeInit = true;
+  } else if (f > gaugeDrawn + 0.001f) {                 // cresce
+    arcSeg(gaugeDrawn, f, col);
+    arcCap(f, col);
+  } else if (f < gaugeDrawn - 0.001f) {                 // cala
+    arcCap(gaugeDrawn, C_TRACK);
+    arcSeg(f, gaugeDrawn + 0.03f > 1 ? 1 : gaugeDrawn + 0.03f, C_TRACK);
+    if (gaugeDrawn > 0.97f) arcCap(1, C_TRACK);
+    arcCap(f, col);
+    arcCap(0, col);
+  } else {
+    f = gaugeDrawn;
   }
+  gaugeDrawn = f;
+  gaugeCol = col;
 
-  // lettura digitale sotto lo strumento
-  char txt[24];
-  if (alive) snprintf(txt, sizeof(txt), "%.*f %s", c.decimals, c.value, c.unit);
-  else       snprintf(txt, sizeof(txt), "--- %s", c.unit);
+  // valore grande al centro
+  char txt[16];
+  if (alive) snprintf(txt, sizeof(txt), "%.*f", c.decimals, c.value);
+  else       snprintf(txt, sizeof(txt), "---");
   if (strcmp(txt, lastMeterTxt)) {
-    display.fillRect(RX + 6, BOX_Y + BOX_H + 6, RW - 12, 40, C_PANEL_R);
-    printCenter(txt, MX, BOX_Y + BOX_H + 38, &FreeSansBold18pt7b, alive ? C_TEXT : C_RED);
+    display.fillRect(MX - 78, MY - 34, 156, 46, C_PANEL_R);
+    printCenter(txt, MX, MY + 4, &FreeSansBold24pt7b, alive ? C_TEXT : C_RED);
     strcpy(lastMeterTxt, txt);
   }
 }

@@ -39,8 +39,8 @@ e scrivi `CH1,5.000` + Invio.
 
 - Pannello sinistro: titolo "IZ0JNY TWT Power Supply", sottotitolo "optical insulated display",
   stato del link (LINK / DEMO / NO DATA) e una riga con barra a tutta larghezza per ognuno dei 4 canali.
-- Pannello destro: voltmetro analogico del canale `METER_CH` (default CH1, 0..10 kV),
-  strumento da pannello classico (quadrante crema, arco di 90°, lancetta nera), lettura digitale e simbolo di alta tensione con la scritta HIGH VOLTAGE.
+- Pannello destro: indicatore ad arco a 270° del canale `METER_CH` (default CH1, 0..10 kV),
+  traccia grigia e riempimento colorato proporzionale al valore, valore grande al centro con 3 decimali e simbolo di alta tensione con la scritta HIGH VOLTAGE.
 
 ## Test in loopback
 
