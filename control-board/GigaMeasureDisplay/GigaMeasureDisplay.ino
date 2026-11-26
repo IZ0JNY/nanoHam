@@ -179,32 +179,18 @@ uint16_t bandColor(float f) { return f < 0.7f ? C_TEAL : (f < 0.9f ? C_ORANGE : 
 void drawLeftStatic() {
   display.fillRoundRect(LX, LY, LW, LH, 14, C_PANEL_L);
   printAt(TITLE, LX + 24, LY + 46, &FreeSansBold18pt7b, C_TEAL);
-  // sottotitolo il piu' grande possibile nella larghezza del pannello:
-  // una riga a 18 o 12 pt, altrimenti due righe a 12 pt (divise al " - ")
-  const int SW = LW - 40;
-  int hrY;
-  display.setFont(&FreeSans18pt7b);
-  if (textWidth(SUBTITLE) <= SW) {
-    printAt(SUBTITLE, LX + 20, LY + 84, &FreeSans18pt7b, C_GREY);
-    hrY = LY + 98;
-  } else {
-    display.setFont(&FreeSans12pt7b);
-    if (textWidth(SUBTITLE) <= SW) {
-      printAt(SUBTITLE, LX + 20, LY + 76, &FreeSans12pt7b, C_GREY);
-      hrY = LY + 92;
-    } else {
-      char l1[64], l2[64];
-      const char *sep = strstr(SUBTITLE, " - ");
-      if (sep) {
-        int n = sep - SUBTITLE;
-        snprintf(l1, sizeof(l1), "%.*s", n, SUBTITLE);
-        snprintf(l2, sizeof(l2), "%s", sep + 3);
-      } else { snprintf(l1, sizeof(l1), "%s", SUBTITLE); l2[0] = 0; }
-      printAt(l1, LX + 20, LY + 76, &FreeSans12pt7b, C_GREY);
-      printAt(l2, LX + 20, LY + 104, &FreeSans12pt7b, C_GREY);
-      hrY = LY + 116;
-    }
+  // sottotitolo su una sola riga, col carattere piu' grande che ci sta nel pannello
+  const int SW = LW - 20;
+  const GFXfont *sfonts[] = {&FreeSans18pt7b, &FreeSans12pt7b, &FreeSans9pt7b};
+  const int sbase[] = {LY + 84, LY + 76, LY + 72};
+  int k = 0;
+  for (; k < 2; k++) {
+    display.setFont(sfonts[k]);
+    if (textWidth(SUBTITLE) <= SW) break;
   }
+  display.setFont(sfonts[k]);
+  printAt(SUBTITLE, LX + (LW - textWidth(SUBTITLE)) / 2, sbase[k], sfonts[k], C_GREY);
+  int hrY = sbase[k] + 14;
   display.drawFastHLine(LX + 20, hrY, LW - 40, C_GREY);
   STATUS_Y = hrY + 30;
   ROW_Y0   = STATUS_Y + 30;
@@ -385,6 +371,7 @@ void setup() {
   LINK.begin(LINK_BAUD);
   display.begin();
   display.setRotation(1);              // 800x480 orizzontale
+  display.setTextWrap(false);          // niente a capo automatico
   splash();
   display.fillScreen(C_BG);
   drawLeftStatic();
