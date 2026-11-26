@@ -1,4 +1,5 @@
 // Test GIGA Display Shield: barre colore, testo e touch
+// Sviluppatore: IZ0JNY
 // Librerie: Arduino_GigaDisplay_GFX, Arduino_GigaDisplayTouch
 #include "Arduino_GigaDisplay_GFX.h"
 #include "Arduino_GigaDisplayTouch.h"
@@ -31,7 +32,7 @@ void setup() {
   display.print("GIGA R1 OK");
   display.setTextSize(2);
   display.setCursor(20, h / 3 + 90);
-  display.print("nanoHam - test display");
+  display.print("nanoHam - IZ0JNY");
   display.setCursor(20, h / 3 + 130);
   display.print("Tocca lo schermo...");
 

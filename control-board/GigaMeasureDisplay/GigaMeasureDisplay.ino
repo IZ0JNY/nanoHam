@@ -1,4 +1,5 @@
 // nanoHam - GIGA R1 WiFi + GIGA Display Shield
+// Sviluppatore: IZ0JNY
 // Riceve le misure dei 4 canali ADC via UART (fibra ottica) e le mostra a display.
 //
 // Collegamento: Serial1 della GIGA, D0 = RX1, D1 = TX1, 115200 8N1.
@@ -195,11 +196,28 @@ void drawValue(int i) {
   if (c.peakSeg >= 0) drawSeg(i, c.peakSeg, true, true);
 }
 
+void splash() {
+  display.fillScreen(BLACK);
+  display.setTextColor(CYAN, BLACK);
+  display.setTextSize(8);
+  display.setCursor((W - 7 * 48) / 2, 140);
+  display.print("nanoHam");
+  display.setTextColor(WHITE, BLACK);
+  display.setTextSize(3);
+  const char *dev = "Sviluppatore: IZ0JNY";
+  display.setCursor((W - strlen(dev) * 18) / 2, 260);
+  display.print(dev);
+  for (int s = 0; s < SEGS; s++)                     // barra colorata decorativa
+    display.fillRect(BX + s * SEG_W, 330, SEG_W - 3, 20, levelColor((s + 0.5f) / SEGS));
+  delay(2000);
+}
+
 void setup() {
   Serial.begin(115200);
   LINK.begin(LINK_BAUD);
   display.begin();
   display.setRotation(1);              // 800x480 orizzontale
+  splash();
   display.fillScreen(BLACK);
   for (int i = 0; i < 4; i++) drawStatic(i);
 }
