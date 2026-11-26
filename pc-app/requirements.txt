@@ -1,0 +1,6 @@
+streamlit>=1.37
+plotly>=5.18
+pyserial>=3.5
+pandas>=2.0
+# facoltativo: finestra propria invece del browser
+pywebview>=5.0; sys_platform == "win32"
