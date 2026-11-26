@@ -88,6 +88,13 @@ const uint16_t NANO_SEND_MS    = 100;    // invio CH2..CH4
 // Seriale di debug su USB (commentare per disattivare).
 #define DEBUG_SERIAL  Serial
 
+// La seriale USB non deve mai bloccare il loop: sulla Nano ESP32, se il PC apre
+// e chiude la porta senza leggere, il buffer si riempie e print() si blocca,
+// fermando anche l'invio in fibra. Si scrive solo se c'e' posto nel buffer.
+#ifdef DEBUG_SERIAL
+#define DBG_OK()  (DEBUG_SERIAL.availableForWrite() >= 80)
+#endif
+
 const uint8_t  ADDR_MOD_A      = 0x48;   // CH1, CH2
 const uint8_t  ADDR_MOD_B      = 0x49;   // CH3, CH4
 
@@ -155,9 +162,11 @@ float readVolts(Module &m) {
 void markLost(Module &m) {
   if (m.present) {
 #ifdef DEBUG_SERIAL
+    if (DBG_OK()) {
     DEBUG_SERIAL.print("Modulo 0x");
     DEBUG_SERIAL.print(m.addr, HEX);
     DEBUG_SERIAL.println(" non risponde");
+    }
 #endif
   }
   m.present = false;
@@ -171,9 +180,11 @@ void tryReconnect(Module &m) {
     m.present = true;
     m.skipNext = true;  // non ha avuto il tempo di assestarsi
 #ifdef DEBUG_SERIAL
+    if (DBG_OK()) {
     DEBUG_SERIAL.print("Modulo 0x");
     DEBUG_SERIAL.print(m.addr, HEX);
     DEBUG_SERIAL.println(" trovato");
+    }
 #endif
   }
 }
@@ -276,6 +287,7 @@ void printSummary() {
 #ifdef DEBUG_SERIAL
   if (millis() - lastPrint < PRINT_MS) return;
   lastPrint = millis();
+  if (!DBG_OK()) return;   // nessuno legge la porta: salta il riepilogo
   for (uint8_t ch = 1; ch <= 4; ch++) {
     DEBUG_SERIAL.print("CH");
     DEBUG_SERIAL.print(ch);
@@ -292,6 +304,9 @@ void printSummary() {
 void setup() {
 #ifdef DEBUG_SERIAL
   DEBUG_SERIAL.begin(115200);
+#ifdef NANOHAM
+  DEBUG_SERIAL.setTxTimeoutMs(0);   // USB CDC ESP32: non aspettare il PC
+#endif
 #endif
   LINK_SERIAL.begin(LINK_BAUD);
 #ifdef NANOHAM
@@ -305,9 +320,11 @@ void setup() {
     m.present = probe(m.addr);
     m.lastTry = millis();
 #ifdef DEBUG_SERIAL
+    if (DBG_OK()) {
     DEBUG_SERIAL.print("Modulo 0x");
     DEBUG_SERIAL.print(m.addr, HEX);
     DEBUG_SERIAL.println(m.present ? " OK" : " ASSENTE");
+    }
 #endif
   }
 
