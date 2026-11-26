@@ -75,14 +75,19 @@ const uint16_t PRINT_MS        = 500;
 #ifdef NANOHAM
 // Ingressi tensione della NanoHam (come nel firmware nanoHam_09):
 // pin, rapporto del partitore, canale del protocollo.
-struct NanoInput { uint8_t pin; float ratio; uint8_t ch; float ema; };
+struct NanoInput { uint8_t pin; float ratio; uint8_t ch; uint32_t sumMv; uint16_t n; };
 NanoInput nanoIn[3] = {
-  { A1, 10.0f, 2, -1.0f },   // V_in2 -> V Master
-  { A2,  5.0f, 3, -1.0f },   // V_in3 -> V Slave
-  { A3,  5.0f, 4, -1.0f },   // V_in4 -> V Aux
+  { A1, 10.0f, 2, 0, 0 },   // V_in2 -> V Master
+  { A2,  5.0f, 3, 0, 0 },   // V_in3 -> V Slave
+  { A3,  5.0f, 4, 0, 0 },   // V_in4 -> V Aux
 };
-const float    NANO_EMA_ALPHA  = 0.2f;   // stesso filtro del firmware NanoHam
-const uint16_t NANO_SAMPLE_MS  = 10;     // campionamento ingressi NanoHam
+// Oversampling: l'ADC della ESP32 e' a 12 bit; con 4^4 = 256 campioni mediati
+// per ogni invio si guadagnano 4 bit di risoluzione (16 bit equivalenti). Il
+// rumore dell'ADC fa da "dither". Migliora la risoluzione, non la linearita':
+// per l'accuratezza serve la calibrazione (CAL AUTO).
+const uint16_t NANO_OVERSAMPLE = 256;    // campioni per misura e per canale
+const uint8_t  NANO_BURST      = 26;     // campioni per canale a ogni passo
+const uint16_t NANO_SAMPLE_MS  = 10;     // un passo ogni 10 ms -> 256 in ~100 ms
 const uint16_t NANO_SEND_MS    = 100;    // invio CH2..CH4
 #endif
 
@@ -321,19 +326,31 @@ void matrixTask() {
 #ifdef NANOHAM
 uint32_t nanoLastSample = 0, nanoLastSend = 0;
 
-// Campiona A1..A3 ogni NANO_SAMPLE_MS (filtro EMA) e manda CH2..CH4
-// ogni NANO_SEND_MS. analogReadMilliVolts usa la calibrazione dell'ADC ESP32.
+// Ogni NANO_SAMPLE_MS legge NANO_BURST campioni per canale (pochi ms, senza
+// bloccare il resto) e li somma. Quando un canale ha NANO_OVERSAMPLE campioni,
+// ne fa la media e la manda. analogReadMilliVolts usa la calibrazione di
+// fabbrica dell'ADC ESP32 (correzione della curva).
+float nanoV[3] = { -1.0f, -1.0f, -1.0f };   // ultima media per canale
+
 void nanoTask() {
   if (millis() - nanoLastSample >= NANO_SAMPLE_MS) {
     nanoLastSample = millis();
-    for (NanoInput &n : nanoIn) {
-      float v = analogReadMilliVolts(n.pin) / 1000.0f * n.ratio;
-      n.ema = (n.ema < 0.0f) ? v : NANO_EMA_ALPHA * v + (1.0f - NANO_EMA_ALPHA) * n.ema;
+    for (uint8_t i = 0; i < 3; i++) {
+      NanoInput &n = nanoIn[i];
+      for (uint8_t k = 0; k < NANO_BURST && n.n < NANO_OVERSAMPLE; k++) {
+        n.sumMv += analogReadMilliVolts(n.pin);
+        n.n++;
+      }
+      if (n.n >= NANO_OVERSAMPLE) {
+        nanoV[i] = (float)n.sumMv / n.n / 1000.0f * n.ratio;
+        n.sumMv = 0;
+        n.n = 0;
+      }
     }
   }
   if (millis() - nanoLastSend >= NANO_SEND_MS) {
     nanoLastSend = millis();
-    for (NanoInput &n : nanoIn) if (n.ema >= 0.0f) sendMeasure(n.ch, n.ema);
+    for (uint8_t i = 0; i < 3; i++) if (nanoV[i] >= 0.0f) sendMeasure(nanoIn[i].ch, nanoV[i]);
   }
 }
 #endif
