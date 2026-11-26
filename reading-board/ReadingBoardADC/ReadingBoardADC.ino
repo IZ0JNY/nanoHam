@@ -26,10 +26,17 @@
 
 // ---------------- configurazione ----------------
 
-// Porta seriale verso il modulo in fibra. Su schede con una sola UART
-// (es. Arduino UNO) usare Serial e scollegare l'USB durante l'uso.
+// Schede previste:
+//  - Arduino UNO R4 WiFi (prove): Serial1 = D0 (RX) / D1 (TX), I2C = pin SDA/SCL
+//    vicino ad AREF (Wire). Il connettore Qwiic della R4 e' Wire1, non Wire.
+//  - NanoHam (Arduino Nano ESP32): Serial1 su D0/D1, I2C su A4 (SDA) / A5 (SCL).
+// Porta seriale verso il modulo in fibra.
 #define LINK_SERIAL   Serial1
 #define LINK_BAUD     115200
+#define I2C_BUS       Wire
+
+// Numero di moduli DFR1184 montati (1 o 2). Con 1 modulo si usano CH1 e CH2.
+#define NUM_MODULES   2
 
 // Seriale di debug su USB (commentare per disattivare).
 #define DEBUG_SERIAL  Serial
@@ -53,9 +60,11 @@ struct Module {
   uint32_t lastTry;
 };
 
-Module mods[2] = {
+Module mods[NUM_MODULES] = {
   { ADDR_MOD_A, 1, false, false, 0 },
+#if NUM_MODULES > 1
   { ADDR_MOD_B, 3, false, false, 0 },
+#endif
 };
 
 uint8_t  ain = 1;          // ingresso in conversione su entrambi i moduli (1/2)
@@ -64,27 +73,27 @@ uint32_t switchedAt = 0;   // millis() del cambio canale
 // ---------------- I2C ----------------
 
 bool probe(uint8_t addr) {
-  Wire.beginTransmission(addr);
-  return Wire.endTransmission() == 0;
+  I2C_BUS.beginTransmission(addr);
+  return I2C_BUS.endTransmission() == 0;
 }
 
 bool selectInput(Module &m, uint8_t input) {
-  Wire.beginTransmission(m.addr);
-  Wire.write(REG_CHANNEL);
-  Wire.write(input);
-  return Wire.endTransmission() == 0;
+  I2C_BUS.beginTransmission(m.addr);
+  I2C_BUS.write(REG_CHANNEL);
+  I2C_BUS.write(input);
+  return I2C_BUS.endTransmission() == 0;
 }
 
 // Ritorna la tensione in volt, o un valore negativo se la lettura fallisce.
 float readVolts(Module &m) {
-  Wire.beginTransmission(m.addr);
-  Wire.write(REG_DATA);
-  if (Wire.endTransmission() != 0) return -1.0f;
+  I2C_BUS.beginTransmission(m.addr);
+  I2C_BUS.write(REG_DATA);
+  if (I2C_BUS.endTransmission() != 0) return -1.0f;
 
-  if (Wire.requestFrom(m.addr, (uint8_t)3) != 3) return -1.0f;
-  uint32_t raw = ((uint32_t)Wire.read() << 16);
-  raw |= ((uint32_t)Wire.read() << 8);
-  raw |= (uint32_t)Wire.read();
+  if (I2C_BUS.requestFrom(m.addr, (uint8_t)3) != 3) return -1.0f;
+  uint32_t raw = ((uint32_t)I2C_BUS.read() << 16);
+  raw |= ((uint32_t)I2C_BUS.read() << 8);
+  raw |= (uint32_t)I2C_BUS.read();
 
   return raw / 100000.0f;   // 0.01 mV -> V
 }
@@ -142,8 +151,8 @@ void setup() {
   DEBUG_SERIAL.begin(115200);
 #endif
   LINK_SERIAL.begin(LINK_BAUD);
-  Wire.begin();
-  Wire.setClock(100000);
+  I2C_BUS.begin();
+  I2C_BUS.setClock(100000);
 
   for (Module &m : mods) {
     m.present = probe(m.addr);
