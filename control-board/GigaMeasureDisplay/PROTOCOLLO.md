@@ -42,3 +42,10 @@ e scrivi `CH1,5.000` + Invio.
   e una riga con barra per ognuno dei 4 canali.
 - Pannello destro: voltmetro analogico del canale `METER_CH` (default CH1, 0..10 kV),
   con lancetta smorzata, lettura digitale e simbolo di alta tensione.
+
+## Test in loopback
+
+Con `SELFTEST 1` la GIGA trasmette `CH1,5.000` su Serial1 (D1) ogni 100 ms.
+Collegando il TX ottico del modulo della GIGA al suo stesso RX ottico (una sola fibra),
+oppure D1 a D0 con un filo, il display deve passare a LINK e mostrare 5 kV.
+Se succede, il lato GIGA (pin, modulo, software) è a posto.

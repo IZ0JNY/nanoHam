@@ -26,6 +26,7 @@
 #define REFRESH_MS  100     // refresh display
 #define TIMEOUT_MS  1000    // oltre questo tempo senza dati il canale va in "NO DATA"
 #define DEMO        1       // 1 = senza dati dalla UART genera un'onda 0..10 V di prova
+#define SELFTEST    0       // 1 = la GIGA trasmette "CH1,5.000" su Serial1 ogni 100 ms (test in loopback)
 #define DEBUG_RX    0       // 1 = stampa ogni riga ricevuta sulla seriale USB
 #define METER_CH    0       // canale mostrato sul voltmetro analogico (0 = CH1)
 
@@ -414,6 +415,7 @@ void loop() {
   static unsigned long lastRefresh = 0;
   if (millis() - lastRefresh >= REFRESH_MS) {
     lastRefresh = millis();
+    if (SELFTEST) LINK.print("CH1,5.000\n");
     demoTick();
     drawStatus();
     drawVinBar();
