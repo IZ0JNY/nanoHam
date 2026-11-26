@@ -34,3 +34,11 @@ Il fondo scala della barra si calcola da solo (0..10 V × scale + offset).
 
 Collega un adattatore USB-seriale 3,3 V a D0 (RX1) e GND, apri un terminale a 115200
 e scrivi `CH1,5.000` + Invio.
+
+## Grafica
+
+- Pannello sinistro: titolo "IZ0JNY TWT Power Supply", sottotitolo "optical insulated display",
+  stato del link (LINK / DEMO / NO DATA), barra verticale della tensione in ingresso 0..10 V
+  e una riga con barra per ognuno dei 4 canali.
+- Pannello destro: voltmetro analogico del canale `METER_CH` (default CH1, 0..10 kV),
+  con lancetta smorzata, lettura digitale e simbolo di alta tensione.
