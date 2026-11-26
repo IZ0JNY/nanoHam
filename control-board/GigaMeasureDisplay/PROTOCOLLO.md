@@ -24,6 +24,7 @@ Nella tabella `ch[]` di `GigaMeasureDisplay.ino`, per ogni canale:
 | `unit` | unità mostrata |
 | `scale` | rapporto di scala: valore mostrato = Vin × scale + offset |
 | `offset` | offset in unità mostrate |
+| `fullScale` | fondo scala della barra e dell'arco, in unità mostrate |
 | `decimals` | decimali mostrati |
 | `enabled` | canale attivo |
 
@@ -61,3 +62,15 @@ Se succede, il lato GIGA (pin, modulo, software) è a posto.
 - Dopo aver ricablato, spegni e riaccendi le schede.
 - I LED dei moduli fissi indicano solo che la luce arriva (UART a riposo); lampeggiano quando passano dati.
 - Se il display torna in DEMO e i LED dei moduli non lampeggiano, controlla prima i fili dupont su R4 pin 1 e GIGA pin 0: un contatto lento basta a interrompere il link. Per l'uso definitivo meglio connettori saldati o a vite.
+
+## Canali e touch
+
+| canale | nome | sorgente | unità | fondo scala |
+|---|---|---|---|---|
+| CH1 | V Helix | DFR1184, 0..10 V = 0..10 kV | kV | 10 |
+| CH2 | V Master | nanoHam A1 (partitore 1:10), volt reali | V | 24 |
+| CH3 | V Slave | nanoHam A2 (partitore 1:5), volt reali | V | 24 |
+| CH4 | V Aux | nanoHam A3 (partitore 1:5), volt reali | V | 24 |
+
+Toccando una riga a sinistra, l'arco a destra mostra quel canale (marcatore teal accanto alla riga).
+Il simbolo HIGH VOLTAGE compare solo con V Helix.

@@ -13,6 +13,7 @@
 // pannello teal a destra (indicatore ad arco del CH1 + simbolo alta tensione).
 
 #include "Arduino_GigaDisplay_GFX.h"
+#include "Arduino_GigaDisplayTouch.h"
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSans18pt7b.h>
@@ -28,7 +29,6 @@
 #define DEMO        1       // 1 = senza dati dalla UART genera un'onda 0..10 V di prova
 #define SELFTEST    0       // 1 = la GIGA trasmette "CH1,5.000" su Serial1 ogni 100 ms (test in loopback)
 #define DEBUG_RX    0       // 1 = stampa ogni riga ricevuta sulla seriale USB
-#define METER_CH    0       // canale mostrato sul voltmetro analogico (0 = CH1)
 
 // Ingresso fisico sempre 0..10 V. Valore mostrato = Vin * scale + offset.
 // CH1: 0..10 V sull'ADC = 0..10 kV reali -> scale = 1.0, unit = "kV".
@@ -39,6 +39,7 @@ struct Channel {
   const char *unit;   // unita' di misura mostrata
   float scale;        // rapporto di scala (partitore, sensore, ...)
   float offset;       // offset in unita' mostrate
+  float fullScale;    // fondo scala in unita' mostrate (barra e arco)
   uint8_t decimals;   // decimali mostrati
   bool enabled;
   // stato runtime
@@ -50,10 +51,12 @@ struct Channel {
 };
 
 Channel ch[4] = {
-  {"V Helix",       "kV", 1.0, 0.0, 3, true,  0, 0, 0, -1, ""},
-  {"V Master",      "V",  1.0, 0.0, 3, true,  0, 0, 0, -1, ""},
-  {"V Slave",       "V",  1.0, 0.0, 3, true,  0, 0, 0, -1, ""},
-  {"V Aux",         "V",  1.0, 0.0, 3, true,  0, 0, 0, -1, ""},
+  // CH1: 0..10 V sull'ADC = 0..10 kV. CH2..4: la nanoHam manda gia' i volt reali
+  // (partitore applicato), fondo scala 24 V.
+  {"V Helix",  "kV", 1.0, 0.0, 10.0, 3, true,  0, 0, 0, -1, ""},
+  {"V Master", "V",  1.0, 0.0, 24.0, 3, true,  0, 0, 0, -1, ""},
+  {"V Slave",  "V",  1.0, 0.0, 24.0, 3, true,  0, 0, 0, -1, ""},
+  {"V Aux",    "V",  1.0, 0.0, 24.0, 3, true,  0, 0, 0, -1, ""},
 };
 
 // ---------- Colori ----------
@@ -75,6 +78,8 @@ const uint16_t C_RED     = rgb(220, 40, 40);
 const uint16_t C_BLACK   = 0x0000;
 
 GigaDisplay_GFX display;
+Arduino_GigaDisplayTouch touch;
+int meterCh = 0;                    // canale mostrato sull'arco (0 = CH1), si cambia col touch
 const int W = 800, H = 480;         // orizzontale
 
 // pannelli
@@ -138,7 +143,7 @@ void demoTick() {
 }
 
 float chMin(const Channel &c) { return c.offset; }
-float chMax(const Channel &c) { return VIN_FS * c.scale + c.offset; }
+float chMax(const Channel &c) { return c.fullScale; }
 bool chAlive(const Channel &c) { return c.lastRx && (millis() - c.lastRx < TIMEOUT_MS); }
 float chFrac(const Channel &c) {
   return constrain((c.value - chMin(c)) / (chMax(c) - chMin(c)), 0.0f, 1.0f);
@@ -217,7 +222,7 @@ void drawLeftStatic() {
 
 int lastStatus = -1;
 void drawStatus() {
-  bool alive = chAlive(ch[METER_CH]);
+  bool alive = chAlive(ch[meterCh]);
   int st = demoActive ? 1 : (alive ? 0 : 2);
   if (st == lastStatus) return;
   lastStatus = st;
@@ -300,13 +305,14 @@ void arcCap(float f, uint16_t col) {
 }
 
 void drawMeterStatic() {
-  Channel &c = ch[METER_CH];
+  Channel &c = ch[meterCh];
   display.fillRoundRect(RX, RY, RW, RH, 14, C_PANEL_R);
   arcSeg(0, 1, C_TRACK);
   arcCap(0, C_TRACK);
   arcCap(1, C_TRACK);
   printCenter(c.unit, MX, MY + 44, &FreeSansBold12pt7b, C_TEXT);
   printCenter(c.name, MX, MY + 96, &FreeSans12pt7b, C_TEXT);
+  if (meterCh != 0) { gaugeInit = false; return; }   // alta tensione solo per V Helix
   // simbolo alta tensione: triangolo giallo con fulmine nero
   int tx = MX, tt = RY + 300, tb = RY + 384, hw = 48;
   display.fillTriangle(tx, tt, tx - hw, tb, tx + hw, tb, C_BLACK);
@@ -321,7 +327,7 @@ void drawMeterStatic() {
 
 char lastMeterTxt[16] = "";
 void drawMeter() {
-  Channel &c = ch[METER_CH];
+  Channel &c = ch[meterCh];
   bool alive = chAlive(c);
   float target = alive ? chFrac(c) : 0.0f;
   gaugeVal += (target - gaugeVal) * 0.5f;              // movimento morbido
@@ -374,6 +380,45 @@ void splash() {
   delay(2000);
 }
 
+// ---------- Touch: tocca una riga a sinistra per vederla sull'arco ----------
+void drawSelMarker() {
+  for (int i = 0; i < 4; i++) {
+    int y = ROW_Y0 + i * ROW_STEP;
+    display.fillRoundRect(LX + 6, y + 2, 6, 48, 3, i == meterCh ? C_TEAL : C_PANEL_L);
+  }
+}
+
+void selectMeter(int i) {
+  if (i == meterCh || !ch[i].enabled) return;
+  meterCh = i;
+  lastMeterTxt[0] = 0;
+  gaugeVal = 0;
+  gaugeDrawn = 0;
+  lastStatus = -1;
+  drawMeterStatic();
+  drawSelMarker();
+  touch.begin();
+  drawSelMarker();
+}
+
+void pollTouch() {
+  static bool wasDown = false;
+  GDTpoint_t p[5];
+  uint8_t n = touch.getTouchPoints(p);
+  if (n && !wasDown) {
+    // touch in coordinate native (verticale 480x800) -> schermo ruotato (800x480)
+    int x = p[0].y, y = 479 - p[0].x;
+    if (DEBUG_RX) { Serial.print("touch "); Serial.print(x); Serial.print(","); Serial.println(y); }
+    if (x >= LX && x < LX + LW) {
+      for (int i = 0; i < 4; i++) {
+        int ry = ROW_Y0 + i * ROW_STEP;
+        if (y >= ry && y < ry + ROW_STEP) selectMeter(i);
+      }
+    }
+  }
+  wasDown = n > 0;
+}
+
 void setup() {
   Serial.begin(115200);
   LINK.begin(LINK_BAUD);
@@ -384,10 +429,13 @@ void setup() {
   display.fillScreen(C_BG);
   drawLeftStatic();
   drawMeterStatic();
+  drawSelMarker();
+  touch.begin();
 }
 
 void loop() {
   pollLink();
+  pollTouch();
 
   static unsigned long lastRefresh = 0;
   if (millis() - lastRefresh >= REFRESH_MS) {
@@ -403,7 +451,7 @@ void loop() {
   static unsigned long lastLog = 0;
   if (millis() - lastLog >= 1000) {
     lastLog = millis();
-    Serial.print(demoActive ? "DEMO" : (chAlive(ch[METER_CH]) ? "LINK" : "NODATA"));
+    Serial.print(demoActive ? "DEMO" : (chAlive(ch[meterCh]) ? "LINK" : "NODATA"));
     Serial.print("  righe ok="); Serial.print(rxCount);
     Serial.print(" scartate="); Serial.print(rxBad);
     for (int i = 0; i < 4; i++) {
