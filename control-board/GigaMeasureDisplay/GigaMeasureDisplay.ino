@@ -16,6 +16,7 @@
 #define LINK_BAUD   115200
 #define REFRESH_MS  100     // refresh display
 #define TIMEOUT_MS  1000    // oltre questo tempo senza dati il canale va in "NO DATA"
+#define DEMO        1       // 1 = senza dati dalla UART genera un'onda 0..10 V di prova
 
 // Ingresso fisico sempre 0..10 V. Valore mostrato = Vin * scale + offset.
 // Es. partitore 10:1 davanti a 0..100 V  -> scale = 10.0, unit = "V".
@@ -51,12 +52,15 @@ Channel ch[4] = {
 #define GREEN   0x07E0
 #define RED     0xF800
 #define CYAN    0x07FF
+#define YELLOW  0xFFE0
 
 GigaDisplay_GFX display;
 const int W = 800, H = 480;         // orizzontale
 const int ROW_H = H / 4;
 
 // ---------- Ricezione UART ----------
+unsigned long lastReal = 0;          // ultimo dato vero ricevuto dalla UART
+bool demoActive = false;
 char rxBuf[32];
 uint8_t rxLen = 0;
 
@@ -71,6 +75,18 @@ void parseLine(char *s) {
   Channel &c = ch[n - 1];
   c.value = v * c.scale + c.offset;   // v = tensione in ingresso 0..10 V
   c.lastRx = millis();
+  lastReal = c.lastRx;
+}
+
+void demoTick() {
+  demoActive = DEMO && (lastReal == 0 || millis() - lastReal > TIMEOUT_MS);
+  if (!demoActive) return;
+  float t = millis() / 1000.0f;
+  for (int i = 0; i < 4; i++) {
+    float vin = 5.0f + 5.0f * sinf(t * 2 * PI / 8.0f + i);   // 0..10 V, periodo 8 s
+    ch[i].value = vin * ch[i].scale + ch[i].offset;
+    ch[i].lastRx = millis();
+  }
 }
 
 void pollLink() {
@@ -176,8 +192,8 @@ void drawValue(int i) {
   // stato link
   display.setTextSize(2);
   display.setCursor(W - 90, y + 10);
-  display.setTextColor(alive ? GREEN : RED, BLACK);
-  display.print(alive ? "  LINK" : "NODATA");
+  display.setTextColor(demoActive ? YELLOW : (alive ? GREEN : RED), BLACK);
+  display.print(demoActive ? "  DEMO" : (alive ? "  LINK" : "NODATA"));
 
   // barra a segmenti: ridisegna solo quelli cambiati
   int segs = alive ? (int)(f * SEGS + 0.5f) : 0;
@@ -228,6 +244,7 @@ void loop() {
   static unsigned long lastRefresh = 0;
   if (millis() - lastRefresh >= REFRESH_MS) {
     lastRefresh = millis();
+    demoTick();
     for (int i = 0; i < 4; i++) {
       if (ch[i].enabled) drawValue(i);
     }

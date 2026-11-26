@@ -12,6 +12,7 @@ CH<n>,<valore>\n
 - Esempio: `CH1,7.532`
 - La reading board manda ogni canale ogni 100 ms (o più spesso). Il display si aggiorna ogni 100 ms.
 - Se un canale non riceve dati per 1 s il display mostra `-----` e `NODATA`.
+- Con `DEMO 1` (default), finché non arrivano dati veri la GIGA genera un'onda 0..10 V di prova e mostra `DEMO`.
 
 ## Configurazione dei canali (lato GIGA)
 
