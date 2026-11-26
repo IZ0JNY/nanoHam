@@ -15,8 +15,7 @@ a COM port. Several boards (one per band: 10, 24, 47 GHz…) each have their own
 Every channel is generic: name, unit, value shown = value received × scale + offset, decimals, alarm thresholds.
 Two kinds: «analog» (voltages, currents, temperatures in °C…) and «logic» (a state: received ≥ 0.5 = ON, shown
 with the user's words, e.g. «PTT» / «RX», alarm when it is in the state chosen as alarm).
-The defaults are the four NanoHam channels sent today (CH1..CH4) plus the proposed CH5..CH8 (temperatures and
-logic inputs of the NanoHam, see pc-app/README.md), off until the firmware sends them."""
+The defaults are the NanoHam channels: CH1..CH4 voltages, CH5/CH6 temperatures (LM35), CH7/CH8 logic inputs."""
 from __future__ import annotations
 
 import collections
@@ -87,16 +86,16 @@ class Channel:
 
 
 def nanoham_channels() -> list[Channel]:
-    """The four NanoHam channels (PROTOCOLLO.md, «Canali e touch») and the proposed CH5..CH8, switched off."""
+    """The NanoHam channels (PROTOCOLLO.md): CH1..CH4 voltages, CH5/CH6 temperatures, CH7/CH8 logic inputs."""
     return [
         Channel(1, "V Helix", "kV", full_scale=10.0),                   # DFR1184: 0..10 V = 0..10 kV
         Channel(2, "V Master", "V", full_scale=24.0),                   # NanoHam sends real volts (divider applied)
         Channel(3, "V Slave", "V", full_scale=24.0),
         Channel(4, "V Aux", "V", full_scale=24.0),
-        Channel(5, "T box", "°C", decimals=1, full_scale=100.0, alarm_max=60.0, enabled=False),      # LM35 on A6
-        Channel(6, "T heatsink", "°C", decimals=1, full_scale=100.0, alarm_max=70.0, enabled=False), # LM35 on A7
-        Channel(7, "In 1", "", kind="logic", enabled=False),                                       # GPIO 6
-        Channel(8, "In 2", "", kind="logic", enabled=False),                                       # GPIO 7
+        Channel(5, "T box", "°C", decimals=1, full_scale=100.0, alarm_max=60.0),      # LM35 on A6
+        Channel(6, "T heatsink", "°C", decimals=1, full_scale=100.0, alarm_max=70.0), # LM35 on A7
+        Channel(7, "In 1", "", kind="logic"),                                       # GPIO 6
+        Channel(8, "In 2", "", kind="logic"),                                       # GPIO 7
     ]
 
 

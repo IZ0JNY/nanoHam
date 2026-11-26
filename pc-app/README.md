@@ -46,21 +46,20 @@ Valore mostrato = valore ricevuto × rapporto + offset. Tipi di canale:
 
 ## Canali
 
-| canale | nome | tipo | stato |
+| canale | nome | tipo | firmware |
 |---|---|---|---|
-| CH1 | V Helix (kV) | analog | inviato oggi |
-| CH2 | V Master (V) | analog | inviato oggi |
-| CH3 | V Slave (V) | analog | inviato oggi |
-| CH4 | V Aux (V) | analog | inviato oggi |
-| CH5 | T box (°C, LM35 su A6) | analog | proposto, spento |
-| CH6 | T heatsink (°C, LM35 su A7) | analog | proposto, spento |
-| CH7 | In 1 (GPIO 6) | logic | proposto, spento |
-| CH8 | In 2 (GPIO 7) | logic | proposto, spento |
+| CH1 | V Helix (kV) | analog | inviato |
+| CH2 | V Master (V) | analog | inviato |
+| CH3 | V Slave (V) | analog | inviato |
+| CH4 | V Aux (V) | analog | inviato |
+| CH5 | T box (°C, LM35 su A6) | analog | inviato |
+| CH6 | T heatsink (°C, LM35 su A7) | analog | inviato |
+| CH7 | In 1 (GPIO 6) | logic | inviato |
+| CH8 | In 2 (GPIO 7) | logic | inviato |
 
-Il firmware di oggi (`ReadingBoardADC.ino`) manda solo CH1..CH4. Le temperature e gli ingressi logici della
-NanoHam (pagina iz0jny.it/nanoham) possono arrivare con lo stesso formato su CH5..CH8: la GIGA scarta già
-i canali oltre il 4, quindi non cambia niente per il display. Quando il firmware li manda basta spuntare
-«Attivo» in Configurazione. Numeri, nomi e tipi si cambiano comunque a piacere.
+CH5..CH8 li manda `ReadingBoardADC.ino` sulla NanoHam come nel firmware nanoHam_09; la GIGA li ignora.
+Con un firmware più vecchio, che manda solo CH1..CH4, togli «Attivo» a CH5..CH8 in Configurazione per non
+avere l'allarme NO DATA. Numeri, nomi e tipi si cambiano comunque a piacere.
 
 ## Test
 
