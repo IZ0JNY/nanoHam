@@ -270,11 +270,14 @@ void drawRow(int i) {
 }
 
 // ---------- Voltmetro analogico (pannello destro) ----------
-const int MX = RX + RW / 2, MY = RY + 140;     // centro
-const int MR = 86;                              // raggio della scala
-const int FACE_R = 114;
-const int NEEDLE_L = MR - 18;
-const float SWEEP = 120.0f;                     // +-120 gradi dalla verticale
+// Strumento da pannello classico: quadrante crema, arco di 90 gradi,
+// lancetta nera con perno in basso, come un vecchio voltmetro a bobina mobile.
+const uint16_t C_CREAM = rgb(244, 236, 212);
+const int BOX_X = RX + 10, BOX_Y = RY + 12, BOX_W = RW - 20, BOX_H = 224;
+const int MX = RX + RW / 2, MY = BOX_Y + BOX_H - 14;   // perno della lancetta
+const int MR = 112;                                     // raggio della scala
+const int NEEDLE_L = MR - 2;
+const float SWEEP = 45.0f;                              // +-45 gradi = arco di 90
 
 float needleVal = 0;          // posizione lancetta (0..1), smorzata
 float needleDrawn = -1;
@@ -286,55 +289,62 @@ void polar(float frac, float r, int &x, int &y) {
 }
 
 void drawNeedle(float frac, uint16_t col) {
-  int x, y;
+  int x, y, x2, y2;
   polar(frac, NEEDLE_L, x, y);
+  polar(frac, 30, x2, y2);
+  display.drawLine(x2, y2, x, y, col);          // punta sottile
+  display.drawLine(x2 + 1, y2, x + 1, y, col);
   float a = (-SWEEP + 2 * SWEEP * frac) * PI / 180.0f;
   int dx = (int)roundf(cosf(a) * 3), dy = (int)roundf(sinf(a) * 3);
-  // lancetta a triangolo stretto
-  display.fillTriangle(MX - dx, MY - dy, MX + dx, MY + dy, x, y, col);
-  display.drawLine(MX, MY, x, y, col);
+  display.fillTriangle(MX - dx, MY - dy, MX + dx, MY + dy, x2, y2, col);  // base piu' larga
+}
+
+// arco, banda rossa e tacche (ridisegnati anche dopo ogni passaggio della lancetta)
+void drawScale() {
+  for (float f = 0; f <= 1.0001f; f += 0.002f) {
+    int x0, y0, x1, y1;
+    if (f >= 0.9f) {                                 // zona rossa 9..10
+      polar(f, MR - 6, x0, y0);
+      polar(f, MR - 1, x1, y1);
+      display.drawLine(x0, y0, x1, y1, C_RED);
+    }
+    polar(f, MR, x0, y0);
+    display.drawPixel(x0, y0, C_BLACK);              // arco
+  }
+  for (int k = 0; k <= 50; k++) {
+    float f = k / 50.0f;
+    int len = (k % 5 == 0) ? 14 : 7;
+    int x0, y0, x1, y1;
+    polar(f, MR, x0, y0);
+    polar(f, MR + len, x1, y1);
+    display.drawLine(x0, y0, x1, y1, C_BLACK);
+    if (k % 5 == 0) {
+      polar(f + 0.002f, MR, x0, y0);
+      polar(f + 0.002f, MR + len, x1, y1);
+      display.drawLine(x0, y0, x1, y1, C_BLACK);
+    }
+  }
 }
 
 void drawMeterStatic() {
   Channel &c = ch[METER_CH];
   display.fillRoundRect(RX, RY, RW, RH, 14, C_PANEL_R);
-  display.fillCircle(MX, MY, FACE_R, C_TEAL);
-  display.fillCircle(MX, MY, FACE_R - 4, C_FACE);
-
-  // banda colorata: verde fino al 70%, arancio fino al 90%, rosso oltre
-  for (float f = 0; f <= 1.0001f; f += 0.002f) {
-    uint16_t col = bandColor(f);
-    int x0, y0, x1, y1;
-    polar(f, MR - 5, x0, y0);
-    polar(f, MR, x1, y1);
-    display.drawLine(x0, y0, x1, y1, col);
-  }
-  // tacche: principali ogni 1 kV, secondarie ogni 0.2
-  for (int k = 0; k <= 50; k++) {
-    float f = k / 50.0f;
-    int len = (k % 5 == 0) ? 16 : 9;
-    int x0, y0, x1, y1;
-    polar(f, MR - len, x0, y0);
-    polar(f, MR, x1, y1);
-    display.drawLine(x0, y0, x1, y1, C_TEXT);
-    if (k % 5 == 0) {
-      polar(f, MR + 1, x0, y0);
-      display.drawLine(x0, y0, x1, y1, C_TEXT);
-    }
-  }
-  // numeri della scala
-  for (int k = 0; k <= 10; k++) {
+  // cassa nera e quadrante crema
+  display.fillRoundRect(BOX_X, BOX_Y, BOX_W, BOX_H, 10, C_BLACK);
+  display.fillRoundRect(BOX_X + 5, BOX_Y + 5, BOX_W - 10, BOX_H - 10, 6, C_CREAM);
+  drawScale();
+  // numeri 0..10 sopra l'arco
+  for (int k = 0; k <= 10; k += 2) {
     float f = k / 10.0f;
     float v = chMin(c) + f * (chMax(c) - chMin(c));
-    char s[8];
-    snprintf(s, sizeof(s), "%g", v);
+    char sv[8];
+    snprintf(sv, sizeof(sv), "%g", v);
     int x, y;
-    polar(f, MR + 15, x, y);
-    printCenter(s, x, y + 6, &FreeSans9pt7b, C_TEXT);
+    polar(f, MR + 24, x, y);
+    printCenter(sv, x, y + 6, &FreeSans9pt7b, C_BLACK);
   }
-  // unita' sul quadrante
-  printCenter(c.unit, MX, MY - 30, &FreeSansBold12pt7b, C_TEAL);
-
+  // unita' e nome in basso a sinistra, fuori dalla corsa della lancetta
+  printAt(c.unit, BOX_X + 16, BOX_Y + BOX_H - 20, &FreeSansBold12pt7b, C_BLACK);
   // simbolo alta tensione: triangolo giallo con fulmine nero
   int tx = MX, tt = RY + 300, tb = RY + 384, hw = 48;
   display.fillTriangle(tx, tt, tx - hw, tb, tx + hw, tb, C_BLACK);
@@ -342,7 +352,7 @@ void drawMeterStatic() {
   int m = (tt + tb) / 2 + 10;
   display.fillTriangle(tx + 8, tt + 22, tx - 12, m + 4, tx + 2, m + 4, C_BLACK);
   display.fillTriangle(tx - 6, tb - 10, tx + 12, m - 4, tx - 1, m - 4, C_BLACK);
-  display.fillTriangle(tx - 6, tb - 10, tx - 11, tb - 20, tx - 1, tb - 18, C_BLACK);  // punta
+  display.fillTriangle(tx - 6, tb - 10, tx - 11, tb - 20, tx - 1, tb - 18, C_BLACK);
   printCenter("HIGH VOLTAGE", MX, RY + 418, &FreeSansBold12pt7b, C_RED);
 }
 
@@ -354,21 +364,21 @@ void drawMeter() {
   needleVal += (target - needleVal) * 0.35f;           // smorzamento "analogico"
 
   if (fabsf(needleVal - needleDrawn) > 0.002f) {
-    if (needleDrawn >= 0) drawNeedle(needleDrawn, C_FACE);
-    drawNeedle(needleVal, alive ? C_RED : C_GREY);
-    display.fillCircle(MX, MY, 9, C_TEXT);               // perno
+    if (needleDrawn >= 0) drawNeedle(needleDrawn, C_CREAM);
+    drawScale();
+    drawNeedle(needleVal, alive ? C_BLACK : C_GREY);
+    display.fillCircle(MX, MY, 10, C_BLACK);             // perno
     display.fillCircle(MX, MY, 3, C_GREY);
     needleDrawn = needleVal;
-    printCenter(c.unit, MX, MY - 30, &FreeSansBold12pt7b, C_TEAL);
   }
 
-  // lettura digitale sotto il quadrante
-  char txt[16];
-  if (alive) snprintf(txt, sizeof(txt), "%.*f", c.decimals, c.value);
-  else       snprintf(txt, sizeof(txt), "---");
+  // lettura digitale sotto lo strumento
+  char txt[24];
+  if (alive) snprintf(txt, sizeof(txt), "%.*f %s", c.decimals, c.value, c.unit);
+  else       snprintf(txt, sizeof(txt), "--- %s", c.unit);
   if (strcmp(txt, lastMeterTxt)) {
-    display.fillRect(MX - 60, MY + 54, 120, 36, C_FACE);
-    printCenter(txt, MX, MY + 84, &FreeSansBold18pt7b, alive ? C_TEXT : C_RED);
+    display.fillRect(RX + 6, BOX_Y + BOX_H + 6, RW - 12, 40, C_PANEL_R);
+    printCenter(txt, MX, BOX_Y + BOX_H + 38, &FreeSansBold18pt7b, alive ? C_TEXT : C_RED);
     strcpy(lastMeterTxt, txt);
   }
 }
