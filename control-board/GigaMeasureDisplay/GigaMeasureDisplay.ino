@@ -276,12 +276,20 @@ void polar(float frac, float r, int &x, int &y) {
   y = MY - (int)roundf(r * cosf(a));
 }
 
+// riempie l'arco tra f0 e f1 con quadrilateri pieni (due triangoli per passo),
+// cosi' il colore e' uniforme senza buchi tra un raggio e l'altro
 void arcSeg(float f0, float f1, uint16_t col) {
-  for (float f = f0; f <= f1; f += 0.0015f) {
-    int x0, y0, x1, y1;
-    polar(f, AR - AT, x0, y0);
-    polar(f, AR + AT, x1, y1);
-    display.drawLine(x0, y0, x1, y1, col);
+  const float step = 0.004f;                    // ~1 grado
+  for (float f = f0; f < f1; f += step) {
+    float g = f + step * 1.25f;                 // leggera sovrapposizione
+    if (g > f1) g = f1;
+    int xi0, yi0, xo0, yo0, xi1, yi1, xo1, yo1;
+    polar(f, AR - AT, xi0, yi0);
+    polar(f, AR + AT, xo0, yo0);
+    polar(g, AR - AT, xi1, yi1);
+    polar(g, AR + AT, xo1, yo1);
+    display.fillTriangle(xi0, yi0, xo0, yo0, xo1, yo1, col);
+    display.fillTriangle(xi0, yi0, xo1, yo1, xi1, yi1, col);
   }
 }
 
