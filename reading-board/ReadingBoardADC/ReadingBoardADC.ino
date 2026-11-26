@@ -11,8 +11,13 @@
  *   CH2 V Master  ADC NanoHam A1 (V_in2), partitore 1:10
  *   CH3 V Slave   ADC NanoHam A2 (V_in3), partitore 1:5
  *   CH4 V Aux     ADC NanoHam A3 (V_in4), partitore 1:5
+ *   CH5 T box       LM35 su A6, gradi C   (come nel firmware nanoHam_09)
+ *   CH6 T heatsink  LM35 su A7, gradi C
+ *   CH7 In 1        ingresso logico GPIO 6, 0/1 (HIGH = 1)
+ *   CH8 In 2        ingresso logico GPIO 7, 0/1
  *   Per CH2..CH4 si manda la tensione vera all'ingresso della NanoHam
  *   (pin x partitore), quindi sulla GIGA la scala di questi canali e' 1.
+ *   CH5..CH8 li legge il programma per PC (pc-app/); la GIGA li ignora.
  *
  * Altre schede (UNO R4 WiFi, prove): due DFR1184
  *   Modulo A  0x48 (A1=0 A0=0)  AIN1 -> CH1, AIN2 -> CH2
@@ -73,13 +78,23 @@ const uint16_t PRINT_MS        = 500;
 #endif
 
 #ifdef NANOHAM
-// Ingressi tensione della NanoHam (come nel firmware nanoHam_09):
-// pin, rapporto del partitore, canale del protocollo.
+// Ingressi analogici della NanoHam (come nel firmware nanoHam_09):
+// pin, rapporto (valore mandato = volt al pin x rapporto), canale del protocollo.
+// LM35: 10 mV/grado C, quindi rapporto 100 -> gradi C (come readTemperature).
 struct NanoInput { uint8_t pin; float ratio; uint8_t ch; uint32_t sumMv; uint16_t n; };
-NanoInput nanoIn[3] = {
-  { A1, 10.0f, 2, 0, 0 },   // V_in2 -> V Master
-  { A2,  5.0f, 3, 0, 0 },   // V_in3 -> V Slave
-  { A3,  5.0f, 4, 0, 0 },   // V_in4 -> V Aux
+#define NANO_NIN 5
+NanoInput nanoIn[NANO_NIN] = {
+  { A1,  10.0f, 2, 0, 0 },   // V_in2 -> V Master
+  { A2,   5.0f, 3, 0, 0 },   // V_in3 -> V Slave
+  { A3,   5.0f, 4, 0, 0 },   // V_in4 -> V Aux
+  { A6, 100.0f, 5, 0, 0 },   // LM35 -> T box
+  { A7, 100.0f, 6, 0, 0 },   // LM35 -> T heatsink
+};
+// Ingressi logici (nanoHam_09: GPIO 6 e 7, INPUT, HIGH = acceso): pin, canale.
+struct NanoDigital { uint8_t pin; uint8_t ch; };
+NanoDigital nanoDin[2] = {
+  { 6, 7 },                  // In 1
+  { 7, 8 },                  // In 2
 };
 // Oversampling: l'ADC della ESP32 e' a 12 bit; con 4^4 = 256 campioni mediati
 // per ogni invio si guadagnano 4 bit di risoluzione (16 bit equivalenti). Il
@@ -88,7 +103,7 @@ NanoInput nanoIn[3] = {
 const uint16_t NANO_OVERSAMPLE = 256;    // campioni per misura e per canale
 const uint8_t  NANO_BURST      = 26;     // campioni per canale a ogni passo
 const uint16_t NANO_SAMPLE_MS  = 10;     // un passo ogni 10 ms -> 256 in ~100 ms
-const uint16_t NANO_SEND_MS    = 100;    // invio CH2..CH4
+const uint16_t NANO_SEND_MS    = 100;    // invio CH2..CH8
 #endif
 
 // Seriale di debug su USB (commentare per disattivare).
@@ -330,12 +345,12 @@ uint32_t nanoLastSample = 0, nanoLastSend = 0;
 // bloccare il resto) e li somma. Quando un canale ha NANO_OVERSAMPLE campioni,
 // ne fa la media e la manda. analogReadMilliVolts usa la calibrazione di
 // fabbrica dell'ADC ESP32 (correzione della curva).
-float nanoV[3] = { -1.0f, -1.0f, -1.0f };   // ultima media per canale
+float nanoV[NANO_NIN] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };   // ultima media per canale
 
 void nanoTask() {
   if (millis() - nanoLastSample >= NANO_SAMPLE_MS) {
     nanoLastSample = millis();
-    for (uint8_t i = 0; i < 3; i++) {
+    for (uint8_t i = 0; i < NANO_NIN; i++) {
       NanoInput &n = nanoIn[i];
       for (uint8_t k = 0; k < NANO_BURST && n.n < NANO_OVERSAMPLE; k++) {
         n.sumMv += analogReadMilliVolts(n.pin);
@@ -350,7 +365,8 @@ void nanoTask() {
   }
   if (millis() - nanoLastSend >= NANO_SEND_MS) {
     nanoLastSend = millis();
-    for (uint8_t i = 0; i < 3; i++) if (nanoV[i] >= 0.0f) sendMeasure(nanoIn[i].ch, nanoV[i]);
+    for (uint8_t i = 0; i < NANO_NIN; i++) if (nanoV[i] >= 0.0f) sendMeasure(nanoIn[i].ch, nanoV[i]);
+    for (NanoDigital &d : nanoDin) sendMeasure(d.ch, digitalRead(d.pin) == HIGH ? 1.0f : 0.0f);
   }
 }
 #endif
@@ -560,6 +576,7 @@ void setup() {
 #ifdef NANOHAM
   analogReadResolution(12);
   for (NanoInput &n : nanoIn) analogSetPinAttenuation(n.pin, ADC_11db);
+  for (NanoDigital &d : nanoDin) pinMode(d.pin, INPUT);   // come nanoHam_09, senza pull-up
 #endif
   I2C_BUS.begin();
   I2C_BUS.setClock(100000);

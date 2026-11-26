@@ -74,3 +74,18 @@ Se succede, il lato GIGA (pin, modulo, software) è a posto.
 
 Toccando una riga a sinistra, l'arco a destra mostra quel canale (marcatore teal accanto alla riga).
 Il simbolo HIGH VOLTAGE compare solo con V Helix.
+
+## Canali in più e programma per PC
+
+La NanoHam manda anche queste misure, con lo stesso formato; la GIGA le ignora (scarta `n > 4`):
+
+| canale | nome | valore |
+|---|---|---|
+| CH5 | T box | °C (LM35 su A6) |
+| CH6 | T heatsink | °C (LM35 su A7) |
+| CH7 | In 1 | 0 o 1 (GPIO 6) |
+| CH8 | In 2 | 0 o 1 (GPIO 7) |
+
+Come nel firmware nanoHam_09: temperatura = volt al pin × 100 (LM35, 10 mV/°C), ingressi senza pull-up,
+HIGH = 1. Valori ogni 100 ms, come CH2..CH4. Il programma per PC in `pc-app/` legge qualsiasi `CH<n>` con
+nome, unità, scala e soglie modificabili.
