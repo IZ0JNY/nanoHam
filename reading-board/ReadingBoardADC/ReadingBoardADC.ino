@@ -36,9 +36,16 @@
 // Schede previste:
 //  - Arduino UNO R4 WiFi (prove): Serial1 = D0 (RX) / D1 (TX), I2C = pin SDA/SCL
 //    vicino ad AREF (Wire). Il connettore Qwiic della R4 e' Wire1, non Wire.
-//  - NanoHam (Arduino Nano ESP32): Serial1 su D0/D1, I2C su A4 (SDA) / A5 (SCL).
+//  - NanoHam (Arduino Nano ESP32, FQBN arduino:esp32:nano_nora): la UART su
+//    D0 (RX) / D1 (TX) e' Serial0; I2C su A4 (SDA) / A5 (SCL), bus condiviso con
+//    l'INA219 della NanoHam (0x40, nessun conflitto con 0x48/0x49).
+//    Logica a 3,3 V: alimentare DFR1184 e TEL0153 a 3,3 V.
 // Porta seriale verso il modulo in fibra.
+#if defined(ARDUINO_NANO_ESP32)
+#define LINK_SERIAL   Serial0
+#else
 #define LINK_SERIAL   Serial1
+#endif
 #define LINK_BAUD     115200
 #define I2C_BUS       Wire
 
