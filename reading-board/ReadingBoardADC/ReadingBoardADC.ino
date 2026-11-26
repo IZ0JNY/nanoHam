@@ -31,6 +31,7 @@
  */
 
 #include <Wire.h>
+#include <EEPROM.h>
 
 // Matrice LED 12x8 della UNO R4 WiFi: mostra la tensione di MATRIX_CH.
 // Sulle altre schede (NanoHam) questa parte non viene compilata.
@@ -191,7 +192,59 @@ void tryReconnect(Module &m) {
 
 // ---------------- UART ----------------
 
-void sendMeasure(uint8_t ch, float volts) {
+// ---------------- calibrazione ----------------
+//
+// Ogni canale: valore inviato = grezzo * gain + offset
+// (grezzo = tensione DFR1184 per CH1, pin x partitore per CH2..CH4).
+// Comandi dal monitor seriale USB (115200, fine riga "a capo"):
+//   CAL SHOW            mostra gain, offset e valore grezzo attuale
+//   CAL <n> LO <volt>   punto basso: tensione nota ora sull'ingresso del canale n
+//   CAL <n> HI <volt>   punto alto: calcola gain e offset dai due punti e salva
+//   CAL <n> <volt>      un punto solo: corregge solo il gain (offset 0) e salva
+//   CAL <n> RESET       gain 1, offset 0 (partitore nominale) e salva
+// I valori restano in EEPROM (NVS sulla Nano ESP32) anche a scheda spenta.
+
+struct CalData {
+  uint32_t magic;
+  float gain[5];
+  float offset[5];
+};
+const uint32_t CAL_MAGIC = 0x4E48434CUL;   // "NHCL"
+CalData cal;
+float lastRaw[5]  = { -1, -1, -1, -1, -1 };
+float loRaw[5]    = { 0, 0, 0, 0, 0 };     // punto basso in attesa del punto alto
+float loRef[5]    = { 0, 0, 0, 0, 0 };
+bool  loSet[5]    = { false, false, false, false, false };
+
+void calDefaults() {
+  cal.magic = CAL_MAGIC;
+  for (uint8_t i = 0; i < 5; i++) { cal.gain[i] = 1.0f; cal.offset[i] = 0.0f; }
+}
+
+void calLoad() {
+#if defined(ARDUINO_ARCH_ESP32)
+  EEPROM.begin(sizeof(CalData));
+#endif
+  EEPROM.get(0, cal);
+  bool ok = cal.magic == CAL_MAGIC;
+  for (uint8_t i = 1; i <= 4 && ok; i++)
+    ok = isfinite(cal.gain[i]) && isfinite(cal.offset[i]) && cal.gain[i] > 0.1f && cal.gain[i] < 10.0f;
+  if (!ok) calDefaults();
+}
+
+void calSave() {
+  EEPROM.put(0, cal);
+#if defined(ARDUINO_ARCH_ESP32)
+  EEPROM.commit();
+#endif
+}
+
+void sendMeasure(uint8_t ch, float raw) {
+  float volts = raw;
+  if (ch >= 1 && ch <= 4) {
+    lastRaw[ch] = raw;
+    volts = raw * cal.gain[ch] + cal.offset[ch];
+  }
   if (volts < 0.0f) volts = 0.0f;
   if (ch <= 4) lastV[ch] = volts;
   LINK_SERIAL.print("CH");
@@ -299,6 +352,88 @@ void printSummary() {
 #endif
 }
 
+#ifdef DEBUG_SERIAL
+void calPrintCh(uint8_t ch) {
+  if (!DBG_OK()) return;
+  DEBUG_SERIAL.print("CH"); DEBUG_SERIAL.print(ch);
+  DEBUG_SERIAL.print(" gain="); DEBUG_SERIAL.print(cal.gain[ch], 5);
+  DEBUG_SERIAL.print(" offset="); DEBUG_SERIAL.print(cal.offset[ch], 4);
+  DEBUG_SERIAL.print(" grezzo="); DEBUG_SERIAL.print(lastRaw[ch], 3);
+  DEBUG_SERIAL.print(" inviato="); DEBUG_SERIAL.println(lastV[ch], 3);
+}
+
+void calReply(const char *msg) {
+  if (DBG_OK()) DEBUG_SERIAL.println(msg);
+}
+
+void handleCommand(char *line) {
+  for (char *c = line; *c; c++) *c = toupper(*c);
+  char *tok = strtok(line, " \t");
+  if (!tok || strcmp(tok, "CAL") != 0) { calReply("Comandi: CAL SHOW | CAL n LO v | CAL n HI v | CAL n v | CAL n RESET"); return; }
+
+  tok = strtok(NULL, " \t");
+  if (!tok || strcmp(tok, "SHOW") == 0) { for (uint8_t i = 1; i <= 4; i++) calPrintCh(i); return; }
+
+  int ch = atoi(tok);
+  if (ch < 1 || ch > 4) { calReply("Canale non valido (1..4)"); return; }
+  char *arg = strtok(NULL, " \t");
+  if (!arg) { calPrintCh(ch); return; }
+
+  if (strcmp(arg, "RESET") == 0) {
+    cal.gain[ch] = 1.0f; cal.offset[ch] = 0.0f; loSet[ch] = false;
+    calSave(); calReply("Reset e salvato"); calPrintCh(ch); return;
+  }
+
+  float raw = lastRaw[ch];
+  if (raw < 0.0f) { calReply("Nessuna lettura su questo canale"); return; }
+
+  if (strcmp(arg, "LO") == 0 || strcmp(arg, "HI") == 0) {
+    char *val = strtok(NULL, " \t");
+    if (!val) { calReply("Manca la tensione"); return; }
+    float ref = atof(val);
+    if (arg[0] == 'L') {
+      loRaw[ch] = raw; loRef[ch] = ref; loSet[ch] = true;
+      calReply("Punto basso memorizzato, ora dai la tensione alta e usa CAL n HI v");
+      return;
+    }
+    float rl = loSet[ch] ? loRaw[ch] : 0.0f;
+    float vl = loSet[ch] ? loRef[ch] : 0.0f;
+    if (fabsf(raw - rl) < 0.05f) { calReply("Punti troppo vicini, allarga la differenza"); return; }
+    float g = (ref - vl) / (raw - rl);
+    if (g < 0.1f || g > 10.0f) { calReply("Gain fuori range, controlla le tensioni"); return; }
+    cal.gain[ch] = g;
+    cal.offset[ch] = vl - g * rl;
+    loSet[ch] = false;
+    calSave(); calReply("Calibrazione a due punti salvata"); calPrintCh(ch); return;
+  }
+
+  // un punto: solo gain
+  float ref = atof(arg);
+  if (raw < 0.05f) { calReply("Tensione troppo bassa per calibrare il gain"); return; }
+  float g = ref / raw;
+  if (g < 0.1f || g > 10.0f) { calReply("Gain fuori range, controlla la tensione"); return; }
+  cal.gain[ch] = g; cal.offset[ch] = 0.0f;
+  calSave(); calReply("Calibrazione a un punto salvata"); calPrintCh(ch);
+}
+
+char cmdBuf[48];
+uint8_t cmdLen = 0;
+
+void commandTask() {
+  while (DEBUG_SERIAL.available()) {
+    char c = DEBUG_SERIAL.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      cmdBuf[cmdLen] = 0;
+      if (cmdLen) handleCommand(cmdBuf);
+      cmdLen = 0;
+    } else if (cmdLen < sizeof(cmdBuf) - 1) {
+      cmdBuf[cmdLen++] = c;
+    }
+  }
+}
+#endif
+
 // ---------------- setup / loop ----------------
 
 void setup() {
@@ -309,6 +444,7 @@ void setup() {
 #endif
 #endif
   LINK_SERIAL.begin(LINK_BAUD);
+  calLoad();
 #ifdef NANOHAM
   analogReadResolution(12);
   for (NanoInput &n : nanoIn) analogSetPinAttenuation(n.pin, ADC_11db);
@@ -343,6 +479,9 @@ void loop() {
   nanoTask();
 #endif
   printSummary();
+#ifdef DEBUG_SERIAL
+  commandTask();
+#endif
   for (Module &m : mods) tryReconnect(m);
 
   if (millis() - switchedAt < SETTLE_MS) return;

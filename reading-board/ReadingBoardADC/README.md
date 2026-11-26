@@ -75,3 +75,21 @@ fibra monomodale 1310 nm con connettori SC, **doppia** (una fibra per verso).
 - I2C su A4 (SDA) / A5 (SCL), lo stesso bus dell'INA219 di bordo (0x40).
 - Fibra su D0 (RX) / D1 (TX), `Serial0`.
 - La Nano ESP32 lavora a 3,3 V e i pin non reggono i 5 V: DFR1184 e TEL0153 a **3,3 V**.
+
+## Calibrazione
+
+Dal monitor seriale dell'IDE Arduino (115200, fine riga "a capo" / newline), con la scheda
+collegata in USB. Valore inviato = grezzo × gain + offset, per ogni canale. I valori si
+salvano in memoria e restano anche a scheda spenta.
+
+| comando | cosa fa |
+|---|---|
+| `CAL SHOW` | mostra gain, offset, valore grezzo e inviato di CH1..CH4 |
+| `CAL 2 LO 1.000` | punto basso: sull'ingresso di CH2 ci sono 1,000 V (misurati col tester) |
+| `CAL 2 HI 12.000` | punto alto: calcola gain e offset dai due punti e salva |
+| `CAL 2 12.000` | un punto solo: corregge solo il gain (offset 0) e salva |
+| `CAL 2 RESET` | torna al partitore nominale (gain 1, offset 0) e salva |
+
+Procedura a due punti: dai la tensione bassa, aspetta un secondo che si stabilizzi, `CAL n LO v`;
+poi la tensione alta, `CAL n HI v`. Se salti il punto basso, `HI` usa 0 V = 0 come punto basso.
+Per CH1 (V Helix) la tensione è quella sull'ingresso AIN1 del DFR1184 (0..10 V).
