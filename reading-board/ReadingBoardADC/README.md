@@ -26,7 +26,9 @@ Configurazione scelta:
 | A      | 0  | 0  | 0x48      | CH1  | CH2  |
 | B      | 0  | 1  | 0x49      | CH3  | CH4  |
 
-Sposta i selettori **a scheda spenta** (lo chiede DFRobot: l'indirizzo si legge all'accensione).
+Sposta i selettori **a scheda spenta**: il modulo legge selettore I2C/UART e indirizzo solo
+all'accensione. Il reset del microcontrollore non basta, bisogna togliere l'alimentazione
+(provato sulla UNO R4: dopo il cambio su I2C il modulo ha risposto solo staccando l'USB).
 L'indirizzo non si cambia da software.
 
 ## Collegamento
