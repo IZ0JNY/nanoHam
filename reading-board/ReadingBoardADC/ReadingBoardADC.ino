@@ -28,7 +28,6 @@
 // Sulle altre schede (NanoHam) questa parte non viene compilata.
 #if defined(ARDUINO_UNOR4_WIFI)
 #define USE_LED_MATRIX
-#include "ArduinoGraphics.h"     // va incluso prima di Arduino_LED_Matrix.h
 #include "Arduino_LED_Matrix.h"
 #endif
 
@@ -43,9 +42,9 @@
 #define LINK_BAUD     115200
 #define I2C_BUS       Wire
 
-// Canale mostrato sulla matrice LED della R4 e passo di scorrimento.
+// Canale mostrato sulla matrice LED della R4 (testo fisso, senza scorrimento).
 const uint8_t  MATRIX_CH       = 1;
-const uint16_t MATRIX_STEP_MS  = 70;
+const uint16_t MATRIX_STEP_MS  = 200;   // aggiornamento della matrice
 // Riepilogo su USB ogni PRINT_MS.
 const uint16_t PRINT_MS        = 500;
 
@@ -166,37 +165,52 @@ void switchAll(uint8_t input) {
 
 #ifdef USE_LED_MATRIX
 ArduinoLEDMatrix matrix;
-char     mtxText[16] = "";
-int      mtxX = 12;          // posizione del testo, scorre verso sinistra
-int      mtxWidth = 0;       // larghezza del testo in pixel
+uint8_t  frame[8][12];
 uint32_t mtxLast = 0;
 
-// Scorrimento non bloccante: un passo ogni MATRIX_STEP_MS.
+// Cifre 3x5, ogni riga 3 bit (bit 2 = colonna sinistra).
+const uint8_t DIGITS[10][5] = {
+  {7,5,5,5,7}, {2,6,2,2,7}, {7,1,7,4,7}, {7,1,7,1,7}, {5,5,7,1,1},
+  {7,4,7,1,7}, {7,4,7,5,7}, {7,1,1,1,1}, {7,5,7,5,7}, {7,5,7,1,7},
+};
+const uint8_t TOP = 1;   // prima riga delle cifre (righe 1..5 di 0..7)
+
+void drawDigit(uint8_t d, uint8_t x) {
+  for (uint8_t r = 0; r < 5; r++)
+    for (uint8_t c = 0; c < 3; c++)
+      if (DIGITS[d][r] & (4 >> c)) frame[TOP + r][x + c] = 1;
+}
+
+void drawDot(uint8_t x) { frame[TOP + 4][x] = 1; }
+
+// Testo fisso, aggiornato ogni MATRIX_STEP_MS:
+//   0..9.99 V  -> "7.53"  (cifra, punto, cifra, cifra)
+//   >= 10 V    -> "10.0"
+//   nessun dato -> "--"
 void matrixTask() {
   if (millis() - mtxLast < MATRIX_STEP_MS) return;
   mtxLast = millis();
 
-  if (mtxX < -mtxWidth) {
-    // Fine del giro: prende il valore piu' recente e riparte da destra.
-    float v = lastV[MATRIX_CH];
-    if (v < 0.0f) snprintf(mtxText, sizeof(mtxText), "CH%u --  ", MATRIX_CH);
-    else {
-      int mv = (int)(v * 100.0f + 0.5f);   // 2 decimali senza printf float
-      snprintf(mtxText, sizeof(mtxText), "%d.%02dV  ", mv / 100, mv % 100);
-    }
-    mtxWidth = strlen(mtxText) * 4;        // Font_4x6: 4 px per carattere
-    mtxX = 12;
+  memset(frame, 0, sizeof(frame));
+  float v = lastV[MATRIX_CH];
+  if (v < 0.0f) {
+    for (uint8_t x = 2; x < 5; x++) frame[TOP + 2][x] = 1;
+    for (uint8_t x = 7; x < 10; x++) frame[TOP + 2][x] = 1;
+  } else if (v < 9.995f) {
+    int cv = (int)(v * 100.0f + 0.5f);       // centesimi di volt
+    drawDigit(cv / 100, 0);
+    drawDot(3);
+    drawDigit((cv / 10) % 10, 5);
+    drawDigit(cv % 10, 9);
+  } else {
+    int dv = (int)(v * 10.0f + 0.5f);        // decimi di volt
+    if (dv > 999) dv = 999;
+    drawDigit(dv / 100, 0);
+    drawDigit((dv / 10) % 10, 4);
+    drawDot(7);
+    drawDigit(dv % 10, 9);
   }
-
-  matrix.beginDraw();
-  matrix.clear();
-  matrix.stroke(0xFFFFFFFF);
-  matrix.textFont(Font_4x6);
-  matrix.beginText(mtxX, 1, 0xFFFFFF);
-  matrix.print(mtxText);
-  matrix.endText();
-  matrix.endDraw();
-  mtxX--;
+  matrix.renderBitmap(frame, 8, 12);
 }
 #endif
 
