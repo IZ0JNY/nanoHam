@@ -50,7 +50,7 @@ struct Channel {
 };
 
 Channel ch[4] = {
-  {"V Helix",       "kV", 1.0, 0.0, 2, true,  0, 0, 0, -1, ""},
+  {"V Helix",       "kV", 1.0, 0.0, 3, true,  0, 0, 0, -1, ""},
   {"Canale 2",      "V",  1.0, 0.0, 2, false, 0, 0, 0, -1, ""},
   {"Canale 3",      "V",  1.0, 0.0, 2, false, 0, 0, 0, -1, ""},
   {"Canale 4",      "V",  1.0, 0.0, 2, false, 0, 0, 0, -1, ""},
