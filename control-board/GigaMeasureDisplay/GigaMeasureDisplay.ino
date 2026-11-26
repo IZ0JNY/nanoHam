@@ -4,7 +4,8 @@
 // Collegamento: Serial1 della GIGA, D0 = RX1, D1 = TX1, 115200 8N1.
 // Protocollo (una riga ASCII per misura, terminata da '\n'):
 //   CH<n>,<valore>\n      es.  CH1,7.532
-//   n = 1..4, valore gia' in unita' ingegneristiche (es. volt), punto decimale.
+//   n = 1..4, valore = tensione in ingresso 0..10 V, punto decimale.
+//   Il rapporto di scala (partitore) si applica qui, nella tabella ch[].
 // Vedi PROTOCOLLO.md.
 
 #include "Arduino_GigaDisplay_GFX.h"
@@ -15,22 +16,30 @@
 #define REFRESH_MS  100     // refresh display
 #define TIMEOUT_MS  1000    // oltre questo tempo senza dati il canale va in "NO DATA"
 
+// Ingresso fisico sempre 0..10 V. Valore mostrato = Vin * scale + offset.
+// Es. partitore 10:1 davanti a 0..100 V  -> scale = 10.0, unit = "V".
+#define VIN_FS 10.0f
+
 struct Channel {
   const char *name;   // nome della misura
-  const char *unit;   // unita' di misura
-  float minV, maxV;   // fondo scala per la barra
+  const char *unit;   // unita' di misura mostrata
+  float scale;        // rapporto di scala (partitore, sensore, ...)
+  float offset;       // offset in unita' mostrate
+  uint8_t decimals;   // decimali mostrati
   bool enabled;
   // stato runtime
-  float value;
+  float value;        // valore gia' scalato
   unsigned long lastRx;
-  bool fresh;
+  int lastSegs;       // segmenti accesi all'ultimo refresh
+  int peakSeg;        // segmento di picco
+  unsigned long peakTime;
 };
 
 Channel ch[4] = {
-  {"Tensione di prova", "V", 0.0, 10.0, true,  0, 0, false},
-  {"Canale 2",          "V", 0.0, 10.0, false, 0, 0, false},
-  {"Canale 3",          "V", 0.0, 10.0, false, 0, 0, false},
-  {"Canale 4",          "V", 0.0, 10.0, false, 0, 0, false},
+  {"Tensione di prova", "V", 1.0, 0.0, 3, true,  0, 0, -1, -1, 0},
+  {"Canale 2",          "V", 1.0, 0.0, 3, false, 0, 0, -1, -1, 0},
+  {"Canale 3",          "V", 1.0, 0.0, 3, false, 0, 0, -1, -1, 0},
+  {"Canale 4",          "V", 1.0, 0.0, 3, false, 0, 0, -1, -1, 0},
 };
 
 // ---------- Colori RGB565 ----------
@@ -59,9 +68,8 @@ void parseLine(char *s) {
   float v = strtof(s + 4, &end);
   if (end == s + 4) return;           // nessun numero
   Channel &c = ch[n - 1];
-  c.value = v;
+  c.value = v * c.scale + c.offset;   // v = tensione in ingresso 0..10 V
   c.lastRx = millis();
-  c.fresh = true;
 }
 
 void pollLink() {
@@ -81,52 +89,110 @@ void pollLink() {
 }
 
 // ---------- Display ----------
+#define SEGS      40          // segmenti della barra
+#define PEAK_MS   2000        // tempo di mantenimento del picco
+
+uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
+  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+
+// colore lungo la scala: verde -> giallo -> arancio -> rosso
+uint16_t levelColor(float f) {
+  f = constrain(f, 0.0f, 1.0f);
+  if (f < 0.5f) return rgb((uint8_t)(f * 2 * 255), 220, 40);
+  return rgb(255, (uint8_t)((1 - f) * 2 * 220), 40);
+}
+
+// colore spento del segmento (stessa tinta, molto scura)
+uint16_t dimColor(float f) {
+  if (f < 0.5f) return rgb((uint8_t)(f * 2 * 50), 45, 10);
+  return rgb(55, (uint8_t)((1 - f) * 2 * 45), 10);
+}
+
+float chMin(const Channel &c) { return c.offset; }
+float chMax(const Channel &c) { return VIN_FS * c.scale + c.offset; }
+
+const int BX = 16, BW = W - 32, BH = 30;      // barra
+const int SEG_W = BW / SEGS;
+
+void drawSeg(int i, int s, bool on, bool peak) {
+  int y = i * ROW_H + ROW_H - BH - 10;
+  float f = (s + 0.5f) / SEGS;
+  uint16_t col = peak ? WHITE : (on ? levelColor(f) : dimColor(f));
+  display.fillRect(BX + s * SEG_W, y, SEG_W - 3, BH, col);
+}
+
 void drawStatic(int i) {
+  Channel &c = ch[i];
   int y = i * ROW_H;
   display.fillRect(0, y, W, ROW_H, BLACK);
+  display.fillRect(0, y + 6, 6, ROW_H - 12, c.enabled ? CYAN : DKGREY);  // accento
   display.drawFastHLine(0, y + ROW_H - 1, W, DKGREY);
-  display.setTextSize(3);
-  display.setTextColor(ch[i].enabled ? CYAN : GREY, BLACK);
-  display.setCursor(16, y + 12);
-  display.print(ch[i].name);
-  if (!ch[i].enabled) {
-    display.setCursor(16, y + 56);
-    display.setTextColor(GREY, BLACK);
+  display.setTextSize(2);
+  display.setTextColor(c.enabled ? CYAN : GREY, BLACK);
+  display.setCursor(BX, y + 10);
+  display.print(c.name);
+  if (!c.enabled) {
+    display.setCursor(BX, y + 40);
     display.print("disabilitato");
+    return;
   }
+  // fondo scala
+  char txt[24];
+  display.setTextColor(GREY, BLACK);
+  snprintf(txt, sizeof(txt), "%.*f", c.decimals > 1 ? 1 : c.decimals, chMin(c));
+  display.setCursor(BX, y + 30);
+  display.print(txt);
+  snprintf(txt, sizeof(txt), "%.*f %s", c.decimals > 1 ? 1 : c.decimals, chMax(c), c.unit);
+  display.setCursor(W - 16 - strlen(txt) * 12, y + 30);
+  display.print(txt);
+  for (int s = 0; s < SEGS; s++) drawSeg(i, s, false, false);
+  c.lastSegs = 0;
+  c.peakSeg = -1;
 }
 
 void drawValue(int i) {
   Channel &c = ch[i];
   int y = i * ROW_H;
   bool alive = c.lastRx && (millis() - c.lastRx < TIMEOUT_MS);
+  float f = (c.value - chMin(c)) / (chMax(c) - chMin(c));
+  f = constrain(f, 0.0f, 1.0f);
 
-  // valore numerico
+  // valore numerico grande, colorato come il livello
   char txt[16];
-  if (alive) snprintf(txt, sizeof(txt), "%7.3f", c.value);
-  else       snprintf(txt, sizeof(txt), "  -----");
-  display.setTextSize(6);
-  display.setTextColor(alive ? WHITE : RED, BLACK);
-  display.setCursor(16, y + 50);
+  if (alive) snprintf(txt, sizeof(txt), "%8.*f", c.decimals, c.value);
+  else       snprintf(txt, sizeof(txt), "   -----");
+  display.setTextSize(5);
+  display.setTextColor(alive ? levelColor(f) : RED, BLACK);
+  int vx = 300;
+  display.setCursor(vx, y + 8);
   display.print(txt);
-  display.setTextSize(4);
-  display.setCursor(16 + 7 * 36 + 12, y + 58);
+  display.setTextSize(3);
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(vx + 8 * 30 + 10, y + 20);
   display.print(c.unit);
-
-  // barra
-  const int bx = 400, by = y + 56, bw = 380, bh = 40;
-  float f = (c.value - c.minV) / (c.maxV - c.minV);
-  if (f < 0) f = 0; if (f > 1) f = 1;
-  int fill = alive ? (int)(f * (bw - 4)) : 0;
-  display.drawRect(bx, by, bw, bh, GREY);
-  display.fillRect(bx + 2, by + 2, fill, bh - 4, GREEN);
-  display.fillRect(bx + 2 + fill, by + 2, bw - 4 - fill, bh - 4, BLACK);
 
   // stato link
   display.setTextSize(2);
-  display.setCursor(W - 110, y + 14);
+  display.setCursor(W - 90, y + 10);
   display.setTextColor(alive ? GREEN : RED, BLACK);
   display.print(alive ? "  LINK" : "NODATA");
+
+  // barra a segmenti: ridisegna solo quelli cambiati
+  int segs = alive ? (int)(f * SEGS + 0.5f) : 0;
+  if (segs > c.lastSegs) for (int s = c.lastSegs; s < segs; s++) drawSeg(i, s, true, false);
+  else                   for (int s = segs; s < c.lastSegs; s++) drawSeg(i, s, false, false);
+  c.lastSegs = segs;
+
+  // picco con mantenimento
+  int pk = segs - 1;
+  unsigned long now = millis();
+  if (pk > c.peakSeg || now - c.peakTime > PEAK_MS) {
+    if (c.peakSeg >= 0) drawSeg(i, c.peakSeg, c.peakSeg < segs, false);
+    c.peakSeg = pk;
+    c.peakTime = now;
+  }
+  if (c.peakSeg >= 0) drawSeg(i, c.peakSeg, true, true);
 }
 
 void setup() {
@@ -146,7 +212,6 @@ void loop() {
     lastRefresh = millis();
     for (int i = 0; i < 4; i++) {
       if (ch[i].enabled) drawValue(i);
-      ch[i].fresh = false;
     }
   }
 }
