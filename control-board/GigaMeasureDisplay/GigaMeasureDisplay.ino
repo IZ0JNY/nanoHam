@@ -166,7 +166,7 @@ void printCenter(const char *s, int xc, int y, const GFXfont *f, uint16_t col) {
 
 // ---------- Pannello sinistro ----------
 const char *TITLE    = "IZ0JNY TWT Power Supply";
-const char *SUBTITLE = "optical insulated display - nanoHam powered";
+const char *SUBTITLE = "optical insulated - nanoHam powered";
 const int STATUS_Y = 132;
 // righe dei canali
 const int ROW_Y0 = 166, ROW_STEP = 68;
@@ -177,7 +177,10 @@ uint16_t bandColor(float f) { return f < 0.7f ? C_TEAL : (f < 0.9f ? C_ORANGE : 
 void drawLeftStatic() {
   display.fillRoundRect(LX, LY, LW, LH, 14, C_PANEL_L);
   printAt(TITLE, LX + 24, LY + 46, &FreeSansBold18pt7b, C_TEAL);
-  printAt(SUBTITLE, LX + 26, LY + 74, &FreeSans9pt7b, C_GREY);
+  // sottotitolo: 12 pt se ci sta nel pannello, altrimenti 9 pt
+  display.setFont(&FreeSans12pt7b);
+  const GFXfont *sf = textWidth(SUBTITLE) <= LW - 52 ? &FreeSans12pt7b : &FreeSans9pt7b;
+  printAt(SUBTITLE, LX + 26, LY + 76, sf, C_GREY);
   display.drawFastHLine(LX + 24, LY + 92, LW - 48, C_GREY);
 
   printAt("Status", LX + 24, STATUS_Y, &FreeSansBold12pt7b, C_TEXT);
