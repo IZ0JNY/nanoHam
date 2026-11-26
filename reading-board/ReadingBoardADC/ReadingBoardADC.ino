@@ -4,14 +4,22 @@
  *
  * Developer: IZ0JNY
  *
- * Legge 4 ingressi 0..10 V da due moduli DFRobot DFR1184 (2 canali ciascuno)
- * collegati in I2C e manda i valori sulla UART verso la GIGA (fibra ottica).
+ * Legge le tensioni e le manda sulla UART verso la GIGA (fibra ottica).
  *
- *   Modulo A  indirizzo 0x48 (switch A1=0 A0=0)  AIN1 -> CH1, AIN2 -> CH2
- *   Modulo B  indirizzo 0x49 (switch A1=0 A0=1)  AIN1 -> CH3, AIN2 -> CH4
+ * NanoHam (Arduino Nano ESP32):
+ *   CH1 V Helix   DFR1184 0x48 (switch A1=0 A0=0), ingresso AIN1, 0..10 V
+ *   CH2 V Master  ADC NanoHam A1 (V_in2), partitore 1:10
+ *   CH3 V Slave   ADC NanoHam A2 (V_in3), partitore 1:5
+ *   CH4 V Aux     ADC NanoHam A3 (V_in4), partitore 1:5
+ *   Per CH2..CH4 si manda la tensione vera all'ingresso della NanoHam
+ *   (pin x partitore), quindi sulla GIGA la scala di questi canali e' 1.
+ *
+ * Altre schede (UNO R4 WiFi, prove): due DFR1184
+ *   Modulo A  0x48 (A1=0 A0=0)  AIN1 -> CH1, AIN2 -> CH2
+ *   Modulo B  0x49 (A1=0 A0=1)  AIN1 -> CH3, AIN2 -> CH4
  *
  * Protocollo (vedi control-board/GigaMeasureDisplay/PROTOCOLLO.md):
- *   una riga per misura "CH<n>,<volt>\n", 115200 8N1, tensione grezza 0..10 V.
+ *   una riga per misura "CH<n>,<volt>\n", 115200 8N1.
  *
  * Il DFR1184 ha un microcontrollore a bordo davanti all'ADS1115: si scrive il
  * canale nel registro 0x20, il modulo impiega ~50 ms ad aggiornare, poi si
@@ -42,6 +50,7 @@
 //    Logica a 3,3 V: alimentare DFR1184 e TEL0153 a 3,3 V.
 // Porta seriale verso il modulo in fibra.
 #if defined(ARDUINO_NANO_ESP32)
+#define NANOHAM
 #define LINK_SERIAL   Serial0
 #else
 #define LINK_SERIAL   Serial1
@@ -55,8 +64,26 @@ const uint16_t MATRIX_STEP_MS  = 200;   // aggiornamento della matrice
 // Riepilogo su USB ogni PRINT_MS.
 const uint16_t PRINT_MS        = 500;
 
-// Numero di moduli DFR1184 montati (1 o 2). Con 1 modulo si usano CH1 e CH2.
+// Numero di moduli DFR1184 montati (1 o 2).
+#ifdef NANOHAM
+#define NUM_MODULES   1
+#else
 #define NUM_MODULES   2
+#endif
+
+#ifdef NANOHAM
+// Ingressi tensione della NanoHam (come nel firmware nanoHam_09):
+// pin, rapporto del partitore, canale del protocollo.
+struct NanoInput { uint8_t pin; float ratio; uint8_t ch; float ema; };
+NanoInput nanoIn[3] = {
+  { A1, 10.0f, 2, -1.0f },   // V_in2 -> V Master
+  { A2,  5.0f, 3, -1.0f },   // V_in3 -> V Slave
+  { A3,  5.0f, 4, -1.0f },   // V_in4 -> V Aux
+};
+const float    NANO_EMA_ALPHA  = 0.2f;   // stesso filtro del firmware NanoHam
+const uint16_t NANO_SAMPLE_MS  = 10;     // campionamento ingressi NanoHam
+const uint16_t NANO_SEND_MS    = 100;    // invio CH2..CH4
+#endif
 
 // Seriale di debug su USB (commentare per disattivare).
 #define DEBUG_SERIAL  Serial
@@ -74,16 +101,20 @@ const uint16_t RETRY_MS        = 1000;   // nuovo tentativo su un modulo assente
 
 struct Module {
   uint8_t  addr;
-  uint8_t  firstCh;     // numero di canale del protocollo per AIN1
+  uint8_t  ch[2];       // canale del protocollo per AIN1 / AIN2 (0 = non inviato)
   bool     present;
   bool     skipNext;    // salta la prima lettura dopo una riconnessione
   uint32_t lastTry;
 };
 
 Module mods[NUM_MODULES] = {
-  { ADDR_MOD_A, 1, false, false, 0 },
+#ifdef NANOHAM
+  { ADDR_MOD_A, {1, 0}, false, false, 0 },   // solo AIN1 = V Helix
+#else
+  { ADDR_MOD_A, {1, 2}, false, false, 0 },
+#endif
 #if NUM_MODULES > 1
-  { ADDR_MOD_B, 3, false, false, 0 },
+  { ADDR_MOD_B, {3, 4}, false, false, 0 },
 #endif
 };
 
@@ -221,6 +252,26 @@ void matrixTask() {
 }
 #endif
 
+#ifdef NANOHAM
+uint32_t nanoLastSample = 0, nanoLastSend = 0;
+
+// Campiona A1..A3 ogni NANO_SAMPLE_MS (filtro EMA) e manda CH2..CH4
+// ogni NANO_SEND_MS. analogReadMilliVolts usa la calibrazione dell'ADC ESP32.
+void nanoTask() {
+  if (millis() - nanoLastSample >= NANO_SAMPLE_MS) {
+    nanoLastSample = millis();
+    for (NanoInput &n : nanoIn) {
+      float v = analogReadMilliVolts(n.pin) / 1000.0f * n.ratio;
+      n.ema = (n.ema < 0.0f) ? v : NANO_EMA_ALPHA * v + (1.0f - NANO_EMA_ALPHA) * n.ema;
+    }
+  }
+  if (millis() - nanoLastSend >= NANO_SEND_MS) {
+    nanoLastSend = millis();
+    for (NanoInput &n : nanoIn) if (n.ema >= 0.0f) sendMeasure(n.ch, n.ema);
+  }
+}
+#endif
+
 void printSummary() {
 #ifdef DEBUG_SERIAL
   if (millis() - lastPrint < PRINT_MS) return;
@@ -243,6 +294,10 @@ void setup() {
   DEBUG_SERIAL.begin(115200);
 #endif
   LINK_SERIAL.begin(LINK_BAUD);
+#ifdef NANOHAM
+  analogReadResolution(12);
+  for (NanoInput &n : nanoIn) analogSetPinAttenuation(n.pin, ADC_11db);
+#endif
   I2C_BUS.begin();
   I2C_BUS.setClock(100000);
 
@@ -267,6 +322,9 @@ void loop() {
 #ifdef USE_LED_MATRIX
   matrixTask();
 #endif
+#ifdef NANOHAM
+  nanoTask();
+#endif
   printSummary();
   for (Module &m : mods) tryReconnect(m);
 
@@ -278,7 +336,8 @@ void loop() {
     if (m.skipNext) { m.skipNext = false; continue; }
     float v = readVolts(m);
     if (v < 0.0f) { markLost(m); continue; }
-    sendMeasure(m.firstCh + (ain - 1), v);
+    uint8_t ch = m.ch[ain - 1];
+    if (ch) sendMeasure(ch, v);
   }
 
   // Passa all'altro ingresso.
