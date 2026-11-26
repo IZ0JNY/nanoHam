@@ -24,6 +24,14 @@
 
 #include <Wire.h>
 
+// Matrice LED 12x8 della UNO R4 WiFi: mostra la tensione di MATRIX_CH.
+// Sulle altre schede (NanoHam) questa parte non viene compilata.
+#if defined(ARDUINO_UNOR4_WIFI)
+#define USE_LED_MATRIX
+#include "ArduinoGraphics.h"     // va incluso prima di Arduino_LED_Matrix.h
+#include "Arduino_LED_Matrix.h"
+#endif
+
 // ---------------- configurazione ----------------
 
 // Schede previste:
@@ -34,6 +42,12 @@
 #define LINK_SERIAL   Serial1
 #define LINK_BAUD     115200
 #define I2C_BUS       Wire
+
+// Canale mostrato sulla matrice LED della R4 e passo di scorrimento.
+const uint8_t  MATRIX_CH       = 1;
+const uint16_t MATRIX_STEP_MS  = 70;
+// Riepilogo su USB ogni PRINT_MS.
+const uint16_t PRINT_MS        = 500;
 
 // Numero di moduli DFR1184 montati (1 o 2). Con 1 modulo si usano CH1 e CH2.
 #define NUM_MODULES   2
@@ -66,6 +80,9 @@ Module mods[NUM_MODULES] = {
   { ADDR_MOD_B, 3, false, false, 0 },
 #endif
 };
+
+float    lastV[5] = { -1, -1, -1, -1, -1 };   // ultima tensione per CH1..CH4 (<0 = nessun dato)
+uint32_t lastPrint = 0;
 
 uint8_t  ain = 1;          // ingresso in conversione su entrambi i moduli (1/2)
 uint32_t switchedAt = 0;   // millis() del cambio canale
@@ -128,6 +145,7 @@ void tryReconnect(Module &m) {
 
 void sendMeasure(uint8_t ch, float volts) {
   if (volts < 0.0f) volts = 0.0f;
+  if (ch <= 4) lastV[ch] = volts;
   LINK_SERIAL.print("CH");
   LINK_SERIAL.print(ch);
   LINK_SERIAL.print(',');
@@ -142,6 +160,59 @@ void switchAll(uint8_t input) {
   }
   ain = input;
   switchedAt = millis();
+}
+
+// ---------------- matrice LED (solo R4 WiFi) ----------------
+
+#ifdef USE_LED_MATRIX
+ArduinoLEDMatrix matrix;
+char     mtxText[16] = "";
+int      mtxX = 12;          // posizione del testo, scorre verso sinistra
+int      mtxWidth = 0;       // larghezza del testo in pixel
+uint32_t mtxLast = 0;
+
+// Scorrimento non bloccante: un passo ogni MATRIX_STEP_MS.
+void matrixTask() {
+  if (millis() - mtxLast < MATRIX_STEP_MS) return;
+  mtxLast = millis();
+
+  if (mtxX < -mtxWidth) {
+    // Fine del giro: prende il valore piu' recente e riparte da destra.
+    float v = lastV[MATRIX_CH];
+    if (v < 0.0f) snprintf(mtxText, sizeof(mtxText), "CH%u --  ", MATRIX_CH);
+    else {
+      int mv = (int)(v * 100.0f + 0.5f);   // 2 decimali senza printf float
+      snprintf(mtxText, sizeof(mtxText), "%d.%02dV  ", mv / 100, mv % 100);
+    }
+    mtxWidth = strlen(mtxText) * 4;        // Font_4x6: 4 px per carattere
+    mtxX = 12;
+  }
+
+  matrix.beginDraw();
+  matrix.clear();
+  matrix.stroke(0xFFFFFFFF);
+  matrix.textFont(Font_4x6);
+  matrix.beginText(mtxX, 1, 0xFFFFFF);
+  matrix.print(mtxText);
+  matrix.endText();
+  matrix.endDraw();
+  mtxX--;
+}
+#endif
+
+void printSummary() {
+#ifdef DEBUG_SERIAL
+  if (millis() - lastPrint < PRINT_MS) return;
+  lastPrint = millis();
+  for (uint8_t ch = 1; ch <= 4; ch++) {
+    DEBUG_SERIAL.print("CH");
+    DEBUG_SERIAL.print(ch);
+    DEBUG_SERIAL.print('=');
+    if (lastV[ch] < 0.0f) DEBUG_SERIAL.print("--");
+    else DEBUG_SERIAL.print(lastV[ch], 3);
+    DEBUG_SERIAL.print(ch < 4 ? "  " : "\n");
+  }
+#endif
 }
 
 // ---------------- setup / loop ----------------
@@ -164,10 +235,18 @@ void setup() {
 #endif
   }
 
+#ifdef USE_LED_MATRIX
+  matrix.begin();
+#endif
+
   switchAll(1);
 }
 
 void loop() {
+#ifdef USE_LED_MATRIX
+  matrixTask();
+#endif
+  printSummary();
   for (Module &m : mods) tryReconnect(m);
 
   if (millis() - switchedAt < SETTLE_MS) return;
