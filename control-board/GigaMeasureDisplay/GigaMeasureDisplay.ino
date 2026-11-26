@@ -9,8 +9,7 @@
 //   Il rapporto di scala (partitore) si applica qui, nella tabella ch[].
 // Vedi PROTOCOLLO.md.
 //
-// Grafica: pannello grigio a sinistra (titolo, stato, barra verticale Vin 0..10 V,
-// 4 canali con barra),
+// Grafica: pannello grigio a sinistra (titolo, stato, 4 canali con barra),
 // pannello teal a destra (voltmetro analogico del CH1 + simbolo alta tensione).
 
 #include "Arduino_GigaDisplay_GFX.h"
@@ -169,12 +168,9 @@ void printCenter(const char *s, int xc, int y, const GFXfont *f, uint16_t col) {
 const char *TITLE    = "IZ0JNY TWT Power Supply";
 const char *SUBTITLE = "optical insulated display";
 const int STATUS_Y = 132;
-// barra verticale Vin 0..10 V del canale del voltmetro
-const int VB_X = LX + 30, VB_W = 40, VB_TOP = 184, VB_SEGS = 25, VB_SEG_H = 10;
-const int VB_BOT = VB_TOP + VB_SEGS * VB_SEG_H;
 // righe dei canali
 const int ROW_Y0 = 166, ROW_STEP = 68;
-const int BAR_X = LX + 120, BAR_W = LW - 120 - 24, BAR_H = 14;
+const int BAR_X = LX + 24, BAR_W = LW - 48, BAR_H = 18;
 
 uint16_t bandColor(float f) { return f < 0.7f ? C_TEAL : (f < 0.9f ? C_ORANGE : C_RED); }
 
@@ -187,16 +183,6 @@ void drawLeftStatic() {
   printAt("Status", LX + 24, STATUS_Y, &FreeSansBold12pt7b, C_TEXT);
   printAt("|", LX + 330, STATUS_Y, &FreeSans12pt7b, C_TEXT);
   printRight("115200 bd", LX + LW - 24, STATUS_Y, &FreeSans12pt7b, C_TEXT);
-
-  // barra verticale: cornice, segmenti spenti, scala
-  printCenter("Vin", VB_X + VB_W / 2, VB_TOP - 10, &FreeSansBold12pt7b, C_TEXT);
-  display.fillRoundRect(VB_X - 4, VB_TOP - 4, VB_W + 8, VB_BOT - VB_TOP + 6, 6, C_BG);
-  for (int k = 0; k <= 10; k += 5) {
-    char sv[4]; snprintf(sv, sizeof(sv), "%d", k);
-    int y = VB_BOT - k * (VB_BOT - VB_TOP) / 10;
-    display.drawFastHLine(VB_X + VB_W + 4, y, 6, C_TEXT);
-    printAt(sv, VB_X + VB_W + 12, y + 6, &FreeSans9pt7b, C_TEXT);
-  }
 
   for (int i = 0; i < 4; i++) {
     int y = ROW_Y0 + i * ROW_STEP;
@@ -212,33 +198,6 @@ void drawLeftStatic() {
   display.setTextColor(C_GREY);
   display.setCursor(LX + LW - 80, LY + LH - 14);
   display.print("dev. IZ0JNY");
-}
-
-int vbLast = -1;
-char vbLastTxt[12] = "";
-void drawVinBar() {
-  Channel &c = ch[METER_CH];
-  bool alive = chAlive(c);
-  float f = alive ? constrain(c.vin / VIN_FS, 0.0f, 1.0f) : 0.0f;
-  int on = (int)(f * VB_SEGS + 0.5f);
-  if (on != vbLast) {
-    for (int k = 0; k < VB_SEGS; k++) {
-      bool was = k < vbLast, is = k < on;
-      if (vbLast >= 0 && was == is) continue;
-      int y = VB_BOT - (k + 1) * VB_SEG_H;
-      display.fillRect(VB_X, y + 1, VB_W, VB_SEG_H - 2,
-                       is ? bandColor((k + 0.5f) / VB_SEGS) : C_BG);
-    }
-    vbLast = on;
-  }
-  char txt[12];
-  if (alive) snprintf(txt, sizeof(txt), "%.2f V", c.vin);
-  else       snprintf(txt, sizeof(txt), "--- V");
-  if (strcmp(txt, vbLastTxt)) {
-    display.fillRect(LX + 8, VB_BOT + 8, 100, 24, C_PANEL_L);
-    printCenter(txt, VB_X + VB_W / 2 + 6, VB_BOT + 26, &FreeSans9pt7b, alive ? C_TEXT : C_RED);
-    strcpy(vbLastTxt, txt);
-  }
 }
 
 int lastStatus = -1;
@@ -355,7 +314,7 @@ void drawMeterStatic() {
   display.fillTriangle(tx + 8, tt + 22, tx - 12, m + 4, tx + 2, m + 4, C_BLACK);
   display.fillTriangle(tx - 6, tb - 10, tx + 12, m - 4, tx - 1, m - 4, C_BLACK);
   display.fillTriangle(tx - 6, tb - 10, tx - 11, tb - 20, tx - 1, tb - 18, C_BLACK);  // punta
-  printCenter("ALTA TENSIONE", MX, RY + 418, &FreeSansBold12pt7b, C_RED);
+  printCenter("HIGH VOLTAGE", MX, RY + 418, &FreeSansBold12pt7b, C_RED);
 }
 
 char lastMeterTxt[16] = "";
@@ -418,7 +377,6 @@ void loop() {
     if (SELFTEST) LINK.print("CH1,5.000\n");
     demoTick();
     drawStatus();
-    drawVinBar();
     for (int i = 0; i < 4; i++) drawRow(i);
     drawMeter();
   }
