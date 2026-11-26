@@ -128,6 +128,7 @@ Module mods[NUM_MODULES] = {
 
 float    lastV[5] = { -1, -1, -1, -1, -1 };   // ultima tensione per CH1..CH4 (<0 = nessun dato)
 uint32_t lastPrint = 0;
+uint8_t  wizCh = 0;        // calibrazione guidata: 0 = non attiva, altrimenti canale 1..4
 
 uint8_t  ain = 1;          // ingresso in conversione su entrambi i moduli (1/2)
 uint32_t switchedAt = 0;   // millis() del cambio canale
@@ -197,6 +198,7 @@ void tryReconnect(Module &m) {
 // Ogni canale: valore inviato = grezzo * gain + offset
 // (grezzo = tensione DFR1184 per CH1, pin x partitore per CH2..CH4).
 // Comandi dal monitor seriale USB (115200, fine riga "a capo"):
+//   CAL AUTO            procedura guidata su tutti i canali (vedi wizTask)
 //   CAL SHOW            mostra gain, offset e valore grezzo attuale
 //   CAL <n> LO <volt>   punto basso: tensione nota ora sull'ingresso del canale n
 //   CAL <n> HI <volt>   punto alto: calcola gain e offset dai due punti e salva
@@ -341,6 +343,7 @@ void printSummary() {
   if (millis() - lastPrint < PRINT_MS) return;
   lastPrint = millis();
   if (!DBG_OK()) return;   // nessuno legge la porta: salta il riepilogo
+  if (wizCh) return;       // durante CAL AUTO niente riepilogo
   for (uint8_t ch = 1; ch <= 4; ch++) {
     DEBUG_SERIAL.print("CH");
     DEBUG_SERIAL.print(ch);
@@ -366,13 +369,105 @@ void calReply(const char *msg) {
   if (DBG_OK()) DEBUG_SERIAL.println(msg);
 }
 
+// ---- procedura guidata: CAL AUTO ----
+// Per ogni canale chiede un punto basso e uno alto. Lo sketch controlla da solo
+// che la lettura sia stabile e ne fa la media; l'utente scrive solo il valore
+// letto sul tester (o S per saltare il punto/canale, Q per uscire).
+const uint8_t  STAB_N      = 10;     // campioni nella finestra
+const uint16_t STAB_MS     = 200;    // un campione ogni 200 ms -> finestra 2 s
+float    stabBuf[STAB_N];
+uint8_t  stabCount = 0, stabIdx = 0;
+uint32_t stabLast = 0;
+
+uint8_t  wizStep = 0;      // 0 = punto basso, 1 = punto alto
+float    wizRawLo = 0, wizRefLo = 0;
+bool     wizStable = false;
+
+void stabReset() { stabCount = 0; stabIdx = 0; wizStable = false; }
+
+// Media della finestra; ritorna true se le letture variano poco.
+bool stabCheck(float &mean) {
+  if (stabCount < STAB_N) return false;
+  float mn = stabBuf[0], mx = stabBuf[0], sum = 0;
+  for (uint8_t i = 0; i < STAB_N; i++) {
+    mn = min(mn, stabBuf[i]); mx = max(mx, stabBuf[i]); sum += stabBuf[i];
+  }
+  mean = sum / STAB_N;
+  return (mx - mn) <= 0.01f + 0.002f * fabsf(mean);
+}
+
+void wizPrompt() {
+  if (!DBG_OK()) return;
+  DEBUG_SERIAL.println();
+  DEBUG_SERIAL.print("== CH"); DEBUG_SERIAL.print(wizCh);
+  DEBUG_SERIAL.print(wizStep == 0 ? " punto BASSO: metti una tensione bassa (es. 0..2 V)"
+                                  : " punto ALTO: metti una tensione alta (vicina al fondo scala)");
+  DEBUG_SERIAL.println(" sull'ingresso,");
+  DEBUG_SERIAL.println("   aspetta 'STABILE' e scrivi la tensione letta col tester (S = salta, Q = esci)");
+  stabReset();
+}
+
+void wizNextCh() {
+  wizStep = 0;
+  do { wizCh++; } while (wizCh <= 4 && lastRaw[wizCh] < 0.0f);   // salta canali senza dati
+  if (wizCh > 4) { wizCh = 0; calReply("== Calibrazione finita. CAL SHOW per vedere i valori."); return; }
+  wizPrompt();
+}
+
+// Chiamata dal loop: campiona il canale in calibrazione e avvisa quando e' stabile.
+void wizTask() {
+  if (!wizCh || millis() - stabLast < STAB_MS) return;
+  stabLast = millis();
+  stabBuf[stabIdx] = lastRaw[wizCh];
+  stabIdx = (stabIdx + 1) % STAB_N;
+  if (stabCount < STAB_N) stabCount++;
+  float mean;
+  bool st = stabCheck(mean);
+  if (st && !wizStable && DBG_OK()) {
+    DEBUG_SERIAL.print("   STABILE (grezzo "); DEBUG_SERIAL.print(mean, 3);
+    DEBUG_SERIAL.println(" V): scrivi la tensione del tester");
+  }
+  if (!st && wizStable) calReply("   lettura in movimento, attendi...");
+  wizStable = st;
+}
+
+void wizInput(char *line) {
+  if (strcmp(line, "Q") == 0) { wizCh = 0; calReply("== Calibrazione interrotta (salvato quanto fatto)."); return; }
+  if (strcmp(line, "S") == 0) {
+    if (wizStep == 0) { wizStep = 1; wizRawLo = 0; wizRefLo = 0; calReply("   punto basso saltato (uso 0 V)"); wizPrompt(); }
+    else { calReply("   canale saltato"); wizNextCh(); }
+    return;
+  }
+  float mean;
+  if (!stabCheck(mean)) { calReply("   lettura non ancora stabile, attendi 'STABILE'"); return; }
+  float ref = atof(line);
+  if (wizStep == 0) {
+    wizRawLo = mean; wizRefLo = ref; wizStep = 1;
+    wizPrompt();
+    return;
+  }
+  if (fabsf(mean - wizRawLo) < 0.5f) { calReply("   punti troppo vicini, metti una tensione piu' alta"); stabReset(); return; }
+  float g = (ref - wizRefLo) / (mean - wizRawLo);
+  if (g < 0.1f || g > 10.0f) { calReply("   gain fuori range, controlla le tensioni e riprova"); wizStep = 0; wizPrompt(); return; }
+  cal.gain[wizCh] = g;
+  cal.offset[wizCh] = wizRefLo - g * wizRawLo;
+  calSave();
+  calPrintCh(wizCh);
+  wizNextCh();
+}
+
 void handleCommand(char *line) {
   for (char *c = line; *c; c++) *c = toupper(*c);
+  if (wizCh) { wizInput(line); return; }
   char *tok = strtok(line, " \t");
-  if (!tok || strcmp(tok, "CAL") != 0) { calReply("Comandi: CAL SHOW | CAL n LO v | CAL n HI v | CAL n v | CAL n RESET"); return; }
+  if (!tok || strcmp(tok, "CAL") != 0) { calReply("Comandi: CAL AUTO | CAL SHOW | CAL n LO v | CAL n HI v | CAL n v | CAL n RESET"); return; }
 
   tok = strtok(NULL, " \t");
   if (!tok || strcmp(tok, "SHOW") == 0) { for (uint8_t i = 1; i <= 4; i++) calPrintCh(i); return; }
+  if (strcmp(tok, "AUTO") == 0) {
+    calReply("== Calibrazione guidata: 2 punti per canale, si salva a ogni canale.");
+    wizCh = 0; wizNextCh(); return;
+  }
 
   int ch = atoi(tok);
   if (ch < 1 || ch > 4) { calReply("Canale non valido (1..4)"); return; }
@@ -481,6 +576,7 @@ void loop() {
   printSummary();
 #ifdef DEBUG_SERIAL
   commandTask();
+  wizTask();
 #endif
   for (Module &m : mods) tryReconnect(m);
 

@@ -84,6 +84,7 @@ salvano in memoria e restano anche a scheda spenta.
 
 | comando | cosa fa |
 |---|---|
+| `CAL AUTO` | **procedura guidata** su tutti i canali (vedi sotto) |
 | `CAL SHOW` | mostra gain, offset, valore grezzo e inviato di CH1..CH4 |
 | `CAL 2 LO 1.000` | punto basso: sull'ingresso di CH2 ci sono 1,000 V (misurati col tester) |
 | `CAL 2 HI 12.000` | punto alto: calcola gain e offset dai due punti e salva |
@@ -93,3 +94,16 @@ salvano in memoria e restano anche a scheda spenta.
 Procedura a due punti: dai la tensione bassa, aspetta un secondo che si stabilizzi, `CAL n LO v`;
 poi la tensione alta, `CAL n HI v`. Se salti il punto basso, `HI` usa 0 V = 0 come punto basso.
 Per CH1 (V Helix) la tensione è quella sull'ingresso AIN1 del DFR1184 (0..10 V).
+
+### Procedura guidata `CAL AUTO`
+
+1. Apri il monitor seriale dell'IDE e scrivi `CAL AUTO`.
+2. Per ogni canale con dati (CH1..CH4) chiede il **punto basso**: metti una tensione bassa
+   sull'ingresso. Quando la lettura è ferma per 2 secondi scrive `STABILE`: scrivi la tensione
+   letta col tester (es. `1.02`) e Invio.
+3. Poi chiede il **punto alto**: metti una tensione vicina al fondo scala, aspetta `STABILE`,
+   scrivi il valore del tester.
+4. Calcola gain e offset, li salva e passa al canale dopo.
+
+`S` salta il punto basso (usa 0 V) o il canale, `Q` esce. Lo sketch usa la media delle letture
+nella finestra di 2 s, quindi non serve essere veloci.
