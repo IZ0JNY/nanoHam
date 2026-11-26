@@ -2,7 +2,7 @@
 // Sviluppatore: IZ0JNY
 // Riceve le misure dei 4 canali ADC via UART (fibra ottica) e le mostra a display.
 //
-// Collegamento: Serial1 della GIGA, D0 = RX1, D1 = TX1, 115200 8N1.
+// Collegamento: Serial1 della GIGA, D0 = RX0, D1 = TX0 (serigrafia RX0/TX0), 115200 8N1.
 // Protocollo (una riga ASCII per misura, terminata da '\n'):
 //   CH<n>,<valore>\n      es.  CH1,7.532
 //   n = 1..4, valore = tensione in ingresso 0..10 V, punto decimale.

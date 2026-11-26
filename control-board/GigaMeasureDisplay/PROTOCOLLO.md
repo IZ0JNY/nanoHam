@@ -1,7 +1,7 @@
 # Protocollo UART reading board → GIGA
 
 - Linea: UART 115200 baud, 8N1, attraverso i moduli in fibra ottica.
-- Lato GIGA: `Serial1`, pin D0 (RX1) e D1 (TX1).
+- Lato GIGA: `Serial1`, pin D0 (RX0) e D1 (TX0), serigrafati RX0/TX0 (non RX1/TX1, che sono Serial2).
 - Una riga ASCII per misura, terminata da `\n` (il `\r` viene ignorato):
 
 ```
@@ -32,7 +32,7 @@ Il fondo scala della barra si calcola da solo (0..10 V × scale + offset).
 
 ## Prova senza la reading board
 
-Collega un adattatore USB-seriale 3,3 V a D0 (RX1) e GND, apri un terminale a 115200
+Collega un adattatore USB-seriale 3,3 V a D0 (RX0) e GND, apri un terminale a 115200
 e scrivi `CH1,5.000` + Invio.
 
 ## Grafica
@@ -49,3 +49,15 @@ Con `SELFTEST 1` la GIGA trasmette `CH1,5.000` su Serial1 (D1) ogni 100 ms.
 Collegando il TX ottico del modulo della GIGA al suo stesso RX ottico (una sola fibra),
 oppure D1 a D0 con un filo, il display deve passare a LINK e mostrare 5 kV.
 Se succede, il lato GIGA (pin, modulo, software) è a posto.
+
+## Cablaggio dei moduli in fibra (verificato il 2026-11-26)
+
+| scheda | pin TX del modulo | pin RX del modulo |
+|---|---|---|
+| GIGA R1 | D0 (RX0) | D1 (TX0) |
+| UNO R4 WiFi | D0 (RX) | D1 (TX) |
+
+- Fibre incrociate: TX ottico della R4 → RX ottico della GIGA, TX ottico della GIGA → RX ottico della R4.
+- VCC e GND di ogni modulo dalla propria scheda. Sul lato GIGA l'uscita del modulo verso D0 non deve superare 3,3 V.
+- Dopo aver ricablato, spegni e riaccendi le schede.
+- I LED dei moduli fissi indicano solo che la luce arriva (UART a riposo); lampeggiano quando passano dati.
